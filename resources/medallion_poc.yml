@@ -10,7 +10,7 @@ resources:
       photon: true
       libraries:
         - glob:
-            include: ../src/pipelines/*.py
+            include: ../src/pipelines/**
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
