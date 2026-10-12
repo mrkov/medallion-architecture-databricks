@@ -96,13 +96,13 @@ def read_landing(object_name: str) -> DataFrame:
         .select(
             *(F.col(column).cast("string").alias(column) for column in columns),
             F.col("_rescued_data").cast("string").alias("_rescued_data"),
+            F.col("_metadata.file_path").cast("string").alias("_source_file"),
         )
         .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("_source_file", F.input_file_name())
         .withColumn("_source_system", F.lit(source_system))
         .withColumn(
             "_batch_id",
-            F.regexp_extract(F.input_file_name(), r"([^/]+)\.csv$", 1),
+            F.regexp_extract(F.col("_source_file"), r"([^/]+)\.csv$", 1),
         )
     )
 
