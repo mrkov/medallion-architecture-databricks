@@ -1,0 +1,28 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 8e93ef48-81ab-4756-859b-bd02d60616c4
+name: crm_source_files
+version: 1.0.0
+status: active
+domain: customer
+description:
+  purpose: CRM contact data arriving independently from ERP orders.
+  usage: Append-only ingestion into the Bronze CRM schema.
+team:
+  name: customer-data
+  members:
+    - username: crm-owner
+      role: Data Product Owner
+schema:
+  - name: crm_contacts
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per CRM contact version.
+    properties:
+      - {name: contact_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: erp_customer_id, logicalType: string, required: true}
+      - {name: email, logicalType: string, required: true, classification: confidential}
+      - {name: marketing_consent, logicalType: string, required: true}
+      - {name: acquisition_channel, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+

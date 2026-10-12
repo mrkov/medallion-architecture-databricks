@@ -1,0 +1,37 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 9e2846d5-52a3-44d1-8f8d-a22a321bfa47
+name: advertising_source_files
+version: 1.0.0
+status: active
+domain: marketing
+description:
+  purpose: Campaign metadata and daily advertising spend arriving after ERP and CRM.
+  usage: Append-only ingestion into the Bronze advertising schema.
+team:
+  name: marketing-data
+  members:
+    - username: marketing-owner
+      role: Data Product Owner
+schema:
+  - name: ads_campaigns
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per advertising campaign version.
+    properties:
+      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: campaign_name, logicalType: string, required: true}
+      - {name: platform, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+  - name: ads_spend
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per campaign and spend date.
+    properties:
+      - {name: spend_date, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
+      - {name: spend_amount, logicalType: string, required: true}
+      - {name: clicks, logicalType: string, required: true}
+      - {name: impressions, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+

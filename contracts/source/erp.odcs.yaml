@@ -1,0 +1,67 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d
+name: erp_source_files
+version: 1.0.0
+status: active
+domain: commerce
+description:
+  purpose: Raw ERP interfaces for customers, products, orders, and order lines.
+  usage: Append-only ingestion into the Bronze ERP schema.
+  limitations: Every source field is represented as a string at the Bronze boundary.
+team:
+  name: commerce-data
+  members:
+    - username: commerce-owner
+      role: Data Product Owner
+schema:
+  - name: erp_customers
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per ERP customer version.
+    properties:
+      - {name: customer_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: customer_number, logicalType: string, required: true}
+      - {name: country_code, logicalType: string, required: true}
+      - {name: created_at, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+  - name: erp_products
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per ERP product version.
+    properties:
+      - {name: product_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: product_name, logicalType: string, required: true}
+      - name: product_hierarchy
+        logicalType: string
+        required: true
+        description: Pipe-delimited family, tier, format, and orientation.
+        examples: [PHOTOBOOK|PREMIUM|A4|LANDSCAPE]
+        logicalTypeOptions:
+          pattern: '^[^|]+\|[^|]+\|[^|]+\|[^|]+$'
+      - {name: active_flag, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+  - name: erp_orders
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per ERP order version.
+    properties:
+      - {name: order_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: customer_id, logicalType: string, required: true}
+      - {name: order_timestamp, logicalType: string, required: true}
+      - {name: order_status, logicalType: string, required: true}
+      - {name: currency_code, logicalType: string, required: true}
+      - {name: campaign_code, logicalType: string, required: false}
+      - {name: updated_at, logicalType: string, required: true}
+  - name: erp_order_lines
+    physicalType: file
+    logicalType: object
+    dataGranularityDescription: One source record per ERP order-line version.
+    properties:
+      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: order_id, logicalType: string, required: true}
+      - {name: product_id, logicalType: string, required: true}
+      - {name: quantity, logicalType: string, required: true}
+      - {name: unit_price, logicalType: string, required: true}
+      - {name: updated_at, logicalType: string, required: true}
+

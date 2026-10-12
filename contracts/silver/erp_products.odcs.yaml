@@ -1,0 +1,63 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 08ec8fc4-3ee5-49a5-a304-3b4db5c87016
+name: silver_erp_products
+version: 1.0.0
+status: active
+domain: commerce
+description:
+  purpose: Typed, deduplicated ERP product records with a parsed product hierarchy.
+  usage: Source-oriented Silver input for product dimensions and facts.
+  limitations: Invalid hierarchy shapes are written to erp_products_quarantine.
+team:
+  name: commerce-data
+  members:
+    - username: commerce-owner
+      role: Data Product Owner
+schema:
+  - name: erp_products
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One current row per ERP product_id.
+    properties:
+      - {name: product_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: product_name, logicalType: string, required: true}
+      - name: product_hierarchy_raw
+        logicalType: string
+        required: true
+        description: Original Bronze value retained for lineage and diagnosis.
+        transformSourceObjects: [bronze.erp_products]
+        transformLogic: product_hierarchy
+      - name: product_family
+        logicalType: string
+        required: true
+        transformSourceObjects: [bronze.erp_products]
+        transformLogic: trim(element_at(split(product_hierarchy, '\\|'), 1))
+        transformDescription: First segment of the four-part product hierarchy.
+      - name: product_tier
+        logicalType: string
+        required: true
+        transformSourceObjects: [bronze.erp_products]
+        transformLogic: trim(element_at(split(product_hierarchy, '\\|'), 2))
+      - name: product_format
+        logicalType: string
+        required: true
+        transformSourceObjects: [bronze.erp_products]
+        transformLogic: trim(element_at(split(product_hierarchy, '\\|'), 3))
+      - name: product_orientation
+        logicalType: string
+        required: true
+        transformSourceObjects: [bronze.erp_products]
+        transformLogic: trim(element_at(split(product_hierarchy, '\\|'), 4))
+      - {name: active, logicalType: boolean, required: true}
+      - {name: updated_at, logicalType: timestamp, required: true}
+      - {name: _ingested_at, logicalType: timestamp, required: true}
+      - {name: _source_file, logicalType: string, required: true}
+    quality:
+      - type: sql
+        query: SELECT count(*) FROM erp_products WHERE product_family IS NULL OR product_tier IS NULL OR product_format IS NULL OR product_orientation IS NULL
+        mustBe: 0
+        dimension: conformity
+        severity: error
+        description: Every accepted product hierarchy must produce all four derived columns.
+

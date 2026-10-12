@@ -1,0 +1,127 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 94da63f7-f9fc-4595-8823-aa27ccb16fe9
+name: gold_commerce_model
+version: 1.0.0
+status: active
+domain: commerce
+description:
+  purpose: Conformed facts and dimensions for sales and marketing analysis.
+  usage: Stable Gold interfaces sourced directly from Silver tables.
+  limitations: Attribution remains explicitly incomplete until CRM and advertising data arrive.
+team:
+  name: analytics-engineering
+  members:
+    - username: analytics-owner
+      role: Data Product Owner
+slaProperties:
+  - property: frequency
+    value: 5
+    unit: minutes
+  - property: latency
+    value: 15
+    unit: minutes
+schema:
+  - name: dim_customer
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One current row per ERP customer_id.
+    properties:
+      - {name: customer_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: customer_id, logicalType: string, required: true, unique: true}
+      - {name: customer_number, logicalType: string, required: true}
+      - {name: country_code, logicalType: string, required: true}
+      - {name: crm_contact_id, logicalType: string, required: false}
+      - {name: email, logicalType: string, required: false, classification: confidential}
+      - {name: marketing_consent, logicalType: boolean, required: false}
+      - {name: acquisition_channel, logicalType: string, required: false}
+      - name: enrichment_status
+        logicalType: string
+        required: true
+        enum:
+          - {value: ERP_ONLY}
+          - {value: CRM_ENRICHED}
+  - name: dim_product
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One current row per ERP product_id.
+    properties:
+      - {name: product_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: product_id, logicalType: string, required: true, unique: true}
+      - {name: product_name, logicalType: string, required: true}
+      - {name: product_family, logicalType: string, required: true}
+      - {name: product_tier, logicalType: string, required: true}
+      - {name: product_format, logicalType: string, required: true}
+      - {name: product_orientation, logicalType: string, required: true}
+      - {name: active, logicalType: boolean, required: true}
+  - name: dim_campaign
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One current row per campaign_code.
+    properties:
+      - {name: campaign_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: campaign_code, logicalType: string, required: true, unique: true}
+      - {name: campaign_name, logicalType: string, required: true}
+      - {name: platform, logicalType: string, required: true}
+  - name: fact_sales
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One row per ERP order_line_id.
+    properties:
+      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: order_id, logicalType: string, required: true}
+      - {name: order_timestamp, logicalType: timestamp, required: true}
+      - {name: order_date, logicalType: date, required: true}
+      - {name: customer_key, logicalType: string, required: true}
+      - {name: product_key, logicalType: string, required: true}
+      - {name: campaign_code, logicalType: string, required: false}
+      - {name: quantity, logicalType: integer, required: true}
+      - {name: unit_price, logicalType: number, required: true}
+      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
+      - {name: currency_code, logicalType: string, required: true}
+      - {name: order_status, logicalType: string, required: true}
+  - name: fact_attributed_sales
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One attribution row per ERP order_line_id.
+    properties:
+      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: order_id, logicalType: string, required: true}
+      - {name: order_date, logicalType: date, required: true}
+      - {name: customer_key, logicalType: string, required: true}
+      - {name: campaign_key, logicalType: string, required: false}
+      - {name: campaign_code, logicalType: string, required: false}
+      - {name: acquisition_channel, logicalType: string, required: false}
+      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
+      - name: completeness_status
+        logicalType: string
+        required: true
+        enum:
+          - {value: ERP_ONLY}
+          - {value: CRM_ENRICHED}
+          - {value: COMPLETE}
+      - {name: crm_match_status, logicalType: string, required: true}
+      - {name: campaign_match_status, logicalType: string, required: true}
+      - {name: latest_source_timestamp, logicalType: timestamp, required: true}
+  - name: fact_ad_spend_daily
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One row per spend_date and campaign_code.
+    properties:
+      - {name: spend_date, logicalType: date, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
+      - {name: campaign_key, logicalType: string, required: true}
+      - {name: spend_amount, logicalType: number, required: true, semanticType: measure}
+      - {name: clicks, logicalType: integer, required: true, semanticType: measure}
+      - {name: impressions, logicalType: integer, required: true, semanticType: measure}
+  - name: data_readiness
+    physicalType: table
+    logicalType: object
+    dataGranularityDescription: One row per source object.
+    properties:
+      - {name: source_object, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: latest_source_timestamp, logicalType: timestamp, required: false}
+      - {name: latest_ingestion_timestamp, logicalType: timestamp, required: false}
+      - {name: record_count, logicalType: integer, required: true}
+      - {name: readiness_status, logicalType: string, required: true}
+

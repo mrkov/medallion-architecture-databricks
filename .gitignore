@@ -205,6 +205,13 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Locally fetched, checksum-verified ODCS schema and Python environments
+contracts/schema/*.json
+!contracts/schema/.gitkeep
+.venv/
+dist/
+*.whl
+
 # Ruff stuff:
 .ruff_cache/
 

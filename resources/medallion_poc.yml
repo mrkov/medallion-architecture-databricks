@@ -1,0 +1,107 @@
+resources:
+  pipelines:
+    medallion_poc:
+      name: "[${bundle.target}] Four-layer medallion POC"
+      catalog: ${var.catalog}
+      target: ${var.schema_prefix}_pipeline
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      libraries:
+        - glob:
+            include: ../src/pipelines/*.py
+      configuration:
+        poc.catalog: ${var.catalog}
+        poc.schema_prefix: ${var.schema_prefix}
+        poc.volume_name: ${var.volume_name}
+
+  jobs:
+    medallion_poc_demo:
+      name: "[${bundle.target}] Four-layer POC staged-arrival demo"
+      tasks:
+        - task_key: seed_erp
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: seed_erp
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: process_erp
+          depends_on:
+            - task_key: seed_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_poc.id}
+            full_refresh: true
+        - task_key: publish_views
+          depends_on:
+            - task_key: process_erp
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: publish_views
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: assert_erp_only
+          depends_on:
+            - task_key: publish_views
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: assert_erp_only
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: seed_crm
+          depends_on:
+            - task_key: assert_erp_only
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: seed_crm
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: process_crm
+          depends_on:
+            - task_key: seed_crm
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_poc.id}
+        - task_key: assert_crm_enriched
+          depends_on:
+            - task_key: process_crm
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: assert_crm_enriched
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: seed_ads
+          depends_on:
+            - task_key: assert_crm_enriched
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: seed_ads
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+        - task_key: process_ads
+          depends_on:
+            - task_key: seed_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.medallion_poc.id}
+        - task_key: assert_complete
+          depends_on:
+            - task_key: process_ads
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: assert_complete
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+
