@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import reduce
 
 from contract_rules import SILVER_PRODUCT_EXPECTATIONS
-from pipeline_common import SOURCE_COLUMNS, latest_record, spark, table_name
+from pipeline_common import SOURCE_COLUMNS, latest_record, scoped, spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
@@ -43,9 +43,7 @@ def _customers() -> DataFrame:
 
 
 def _products() -> DataFrame:
-    base = _bronze("erp_products").withColumnRenamed(
-        "product_hierarchy", "product_hierarchy_raw"
-    )
+    base = _bronze("erp_products").withColumnRenamed("product_hierarchy", "product_hierarchy_raw")
     parts = F.split(F.trim(F.col("product_hierarchy_raw")), r"\|", -1)
     return (
         base.withColumn("_active_flag_raw", F.lower(F.trim(F.col("active_flag"))))
@@ -73,8 +71,7 @@ def _products() -> DataFrame:
                 ),
                 (
                     "HIERARCHY_EMPTY_SEGMENT",
-                    (F.size(parts) == 4)
-                    & F.exists(parts, lambda segment: F.length(F.trim(segment)) == 0),
+                    (F.size(parts) == 4) & F.exists(parts, lambda segment: F.length(F.trim(segment)) == 0),
                 ),
                 ("ACTIVE_FLAG_INVALID", F.col("active").isNull()),
                 ("UPDATED_AT_INVALID", F.col("updated_at").isNull()),
@@ -128,9 +125,7 @@ def _order_lines() -> DataFrame:
 
 
 def _contacts() -> DataFrame:
-    base = _bronze("crm_contacts").withColumn(
-        "_marketing_consent_raw", F.lower(F.trim(F.col("marketing_consent")))
-    )
+    base = _bronze("crm_contacts").withColumn("_marketing_consent_raw", F.lower(F.trim(F.col("marketing_consent"))))
     return (
         base.withColumn("_updated_at_raw", F.col("updated_at"))
         .withColumn(
@@ -210,61 +205,138 @@ def _valid(df: DataFrame, keys: list[str]) -> DataFrame:
     )
 
 
-@dp.materialized_view(name=table_name("silver", "erp_customers"), table_properties={"layer": "silver"})
+@scoped(
+    "erp",
+    dp.materialized_view(name=table_name("silver", "erp_customers"), table_properties={"layer": "silver"}),
+)
 def silver_erp_customers():
     return _valid(_customers(), ["customer_id"]).select(
-        "customer_id", "customer_number", "country_code", "created_at", "updated_at",
-        "_ingested_at", "_source_file", "_source_system", "_batch_id"
+        "customer_id",
+        "customer_number",
+        "country_code",
+        "created_at",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "erp_products"), table_properties={"layer": "silver"})
-@dp.expect_all_or_fail(SILVER_PRODUCT_EXPECTATIONS)
+@scoped(
+    "erp",
+    dp.materialized_view(name=table_name("silver", "erp_products"), table_properties={"layer": "silver"}),
+)
+@scoped("erp", dp.expect_all_or_fail(SILVER_PRODUCT_EXPECTATIONS))
 def silver_erp_products():
     return _valid(_products(), ["product_id"]).select(
-        "product_id", "product_name", "product_hierarchy_raw", "product_family", "product_tier",
-        "product_format", "product_orientation", "active", "updated_at", "_ingested_at",
-        "_source_file", "_source_system", "_batch_id"
+        "product_id",
+        "product_name",
+        "product_hierarchy_raw",
+        "product_family",
+        "product_tier",
+        "product_format",
+        "product_orientation",
+        "active",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "erp_orders"), table_properties={"layer": "silver"})
+@scoped(
+    "erp",
+    dp.materialized_view(name=table_name("silver", "erp_orders"), table_properties={"layer": "silver"}),
+)
 def silver_erp_orders():
     return _valid(_orders(), ["order_id"]).select(
-        "order_id", "customer_id", "order_timestamp", "order_status", "currency_code",
-        "campaign_code", "updated_at", "_ingested_at", "_source_file", "_source_system", "_batch_id"
+        "order_id",
+        "customer_id",
+        "order_timestamp",
+        "order_status",
+        "currency_code",
+        "campaign_code",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "erp_order_lines"), table_properties={"layer": "silver"})
+@scoped(
+    "erp",
+    dp.materialized_view(name=table_name("silver", "erp_order_lines"), table_properties={"layer": "silver"}),
+)
 def silver_erp_order_lines():
     return _valid(_order_lines(), ["order_line_id"]).select(
-        "order_line_id", "order_id", "product_id", "quantity", "unit_price", "updated_at",
-        "_ingested_at", "_source_file", "_source_system", "_batch_id"
+        "order_line_id",
+        "order_id",
+        "product_id",
+        "quantity",
+        "unit_price",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "crm_contacts"), table_properties={"layer": "silver"})
+@scoped(
+    "crm",
+    dp.materialized_view(name=table_name("silver", "crm_contacts"), table_properties={"layer": "silver"}),
+)
 def silver_crm_contacts():
     return _valid(_contacts(), ["contact_id"]).select(
-        "contact_id", "erp_customer_id", "email", "marketing_consent", "acquisition_channel",
-        "updated_at", "_ingested_at", "_source_file", "_source_system", "_batch_id"
+        "contact_id",
+        "erp_customer_id",
+        "email",
+        "marketing_consent",
+        "acquisition_channel",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "ads_campaigns"), table_properties={"layer": "silver"})
+@scoped(
+    "ads",
+    dp.materialized_view(name=table_name("silver", "ads_campaigns"), table_properties={"layer": "silver"}),
+)
 def silver_ads_campaigns():
     return _valid(_campaigns(), ["campaign_code"]).select(
-        "campaign_code", "campaign_name", "platform", "updated_at", "_ingested_at",
-        "_source_file", "_source_system", "_batch_id"
+        "campaign_code",
+        "campaign_name",
+        "platform",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
-@dp.materialized_view(name=table_name("silver", "ads_spend"), table_properties={"layer": "silver"})
+@scoped(
+    "ads",
+    dp.materialized_view(name=table_name("silver", "ads_spend"), table_properties={"layer": "silver"}),
+)
 def silver_ads_spend():
     return _valid(_spend(), ["spend_date", "campaign_code"]).select(
-        "spend_date", "campaign_code", "spend_amount", "clicks", "impressions", "updated_at",
-        "_ingested_at", "_source_file", "_source_system", "_batch_id"
+        "spend_date",
+        "campaign_code",
+        "spend_amount",
+        "clicks",
+        "impressions",
+        "updated_at",
+        "_ingested_at",
+        "_source_file",
+        "_source_system",
+        "_batch_id",
     )
 
 
@@ -280,22 +352,47 @@ def _quarantine_rows(df: DataFrame, source_object: str, key_column: str) -> Data
     )
 
 
-@dp.materialized_view(
-    name=table_name("silver", "contract_quarantine"),
-    comment="Records rejected from typed Silver outputs with ODCS-derived violation codes.",
-    table_properties={"layer": "silver", "quality": "quarantine"},
+@scoped(
+    "erp",
+    dp.materialized_view(
+        name=table_name("silver", "erp_contract_quarantine"),
+        comment="ERP records rejected from typed Silver outputs with ODCS-derived violation codes.",
+        table_properties={"layer": "silver", "quality": "quarantine"},
+    ),
 )
-def silver_contract_quarantine():
+def silver_erp_contract_quarantine():
     frames = [
         _quarantine_rows(_customers(), "erp_customers", "customer_id"),
         _quarantine_rows(_products(), "erp_products", "product_id"),
         _quarantine_rows(_orders(), "erp_orders", "order_id"),
         _quarantine_rows(_order_lines(), "erp_order_lines", "order_line_id"),
-        _quarantine_rows(_contacts(), "crm_contacts", "contact_id"),
-        _quarantine_rows(_campaigns(), "ads_campaigns", "campaign_code"),
-        _quarantine_rows(
-            _spend(), "ads_spend", "campaign_code"
-        ),
     ]
     return reduce(lambda left, right: left.unionByName(right), frames)
 
+
+@scoped(
+    "crm",
+    dp.materialized_view(
+        name=table_name("silver", "crm_contract_quarantine"),
+        comment="CRM records rejected from typed Silver outputs with ODCS-derived violation codes.",
+        table_properties={"layer": "silver", "quality": "quarantine"},
+    ),
+)
+def silver_crm_contract_quarantine():
+    return _quarantine_rows(_contacts(), "crm_contacts", "contact_id")
+
+
+@scoped(
+    "ads",
+    dp.materialized_view(
+        name=table_name("silver", "ads_contract_quarantine"),
+        comment="Advertising records rejected from typed Silver outputs with ODCS-derived violation codes.",
+        table_properties={"layer": "silver", "quality": "quarantine"},
+    ),
+)
+def silver_ads_contract_quarantine():
+    frames = [
+        _quarantine_rows(_campaigns(), "ads_campaigns", "campaign_code"),
+        _quarantine_rows(_spend(), "ads_spend", "campaign_code"),
+    ]
+    return reduce(lambda left, right: left.unionByName(right), frames)

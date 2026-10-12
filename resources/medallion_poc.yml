@@ -1,9 +1,9 @@
 resources:
   pipelines:
-    medallion_poc:
-      name: "[${bundle.target}] Four-layer medallion POC"
+    erp_source_pipeline:
+      name: "[${bundle.target}] ERP Bronze to Silver"
       catalog: ${var.catalog}
-      target: ${var.schema_prefix}_pipeline
+      target: ${var.schema_prefix}_bronze
       channel: ${var.pipeline_channel}
       serverless: true
       continuous: false
@@ -15,8 +15,154 @@ resources:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
+        poc.pipeline_scope: erp
+
+    crm_source_pipeline:
+      name: "[${bundle.target}] CRM Bronze to Silver"
+      catalog: ${var.catalog}
+      target: ${var.schema_prefix}_bronze
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      libraries:
+        - glob:
+            include: ../src/pipelines/**
+      configuration:
+        poc.catalog: ${var.catalog}
+        poc.schema_prefix: ${var.schema_prefix}
+        poc.volume_name: ${var.volume_name}
+        poc.pipeline_scope: crm
+
+    ads_source_pipeline:
+      name: "[${bundle.target}] Ads Bronze to Silver"
+      catalog: ${var.catalog}
+      target: ${var.schema_prefix}_bronze
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      libraries:
+        - glob:
+            include: ../src/pipelines/**
+      configuration:
+        poc.catalog: ${var.catalog}
+        poc.schema_prefix: ${var.schema_prefix}
+        poc.volume_name: ${var.volume_name}
+        poc.pipeline_scope: ads
+
+    gold_pipeline:
+      name: "[${bundle.target}] Silver to Gold"
+      catalog: ${var.catalog}
+      target: ${var.schema_prefix}_gold
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      libraries:
+        - glob:
+            include: ../src/pipelines/**
+      configuration:
+        poc.catalog: ${var.catalog}
+        poc.schema_prefix: ${var.schema_prefix}
+        poc.volume_name: ${var.volume_name}
+        poc.pipeline_scope: gold
+
+    platinum_pipeline:
+      name: "[${bundle.target}] Gold to Platinum"
+      catalog: ${var.catalog}
+      target: ${var.schema_prefix}_platinum
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      libraries:
+        - glob:
+            include: ../src/pipelines/**
+      configuration:
+        poc.catalog: ${var.catalog}
+        poc.schema_prefix: ${var.schema_prefix}
+        poc.volume_name: ${var.volume_name}
+        poc.pipeline_scope: platinum
 
   jobs:
+    curated_refresh:
+      name: "[${bundle.target}] Refresh Gold and Platinum"
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      tasks:
+        - task_key: refresh_gold
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_pipeline.id}
+        - task_key: refresh_platinum
+          depends_on:
+            - task_key: refresh_gold
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
+        - task_key: publish_dimension_views
+          depends_on:
+            - task_key: refresh_platinum
+          notebook_task:
+            notebook_path: ../src/notebooks/demo_control.py
+            base_parameters:
+              action: publish_views
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
+
+    ingest_erp:
+      name: "[${bundle.target}] Ingest ERP then refresh curated layers"
+      tasks:
+        - task_key: ingest_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+        - task_key: refresh_curated_layers
+          depends_on:
+            - task_key: ingest_erp
+          run_job_task:
+            job_id: ${resources.jobs.curated_refresh.id}
+
+    ingest_crm:
+      name: "[${bundle.target}] Ingest CRM then refresh curated layers"
+      tasks:
+        - task_key: ingest_crm
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+        - task_key: refresh_curated_layers
+          depends_on:
+            - task_key: ingest_crm
+          run_job_task:
+            job_id: ${resources.jobs.curated_refresh.id}
+
+    ingest_ads:
+      name: "[${bundle.target}] Ingest Ads then refresh curated layers"
+      tasks:
+        - task_key: ingest_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+        - task_key: refresh_curated_layers
+          depends_on:
+            - task_key: ingest_ads
+          run_job_task:
+            job_id: ${resources.jobs.curated_refresh.id}
+
+    initialize_source_interfaces:
+      name: "[${bundle.target}] Initialize source interfaces"
+      tasks:
+        - task_key: initialize_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+            full_refresh: true
+        - task_key: initialize_crm
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+            full_refresh: true
+        - task_key: initialize_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+            full_refresh: true
+
     medallion_poc_demo:
       name: "[${bundle.target}] Four-layer POC staged-arrival demo"
       tasks:
@@ -32,11 +178,37 @@ resources:
           depends_on:
             - task_key: seed_erp
           pipeline_task:
-            pipeline_id: ${resources.pipelines.medallion_poc.id}
+            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+            full_refresh: true
+        - task_key: initialize_empty_crm
+          depends_on:
+            - task_key: seed_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+            full_refresh: true
+        - task_key: initialize_empty_ads
+          depends_on:
+            - task_key: seed_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+            full_refresh: true
+        - task_key: gold_after_erp
+          depends_on:
+            - task_key: process_erp
+            - task_key: initialize_empty_crm
+            - task_key: initialize_empty_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_pipeline.id}
+            full_refresh: true
+        - task_key: platinum_after_erp
+          depends_on:
+            - task_key: gold_after_erp
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
             full_refresh: true
         - task_key: publish_views
           depends_on:
-            - task_key: process_erp
+            - task_key: platinum_after_erp
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:
@@ -68,10 +240,20 @@ resources:
           depends_on:
             - task_key: seed_crm
           pipeline_task:
-            pipeline_id: ${resources.pipelines.medallion_poc.id}
-        - task_key: assert_crm_enriched
+            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+        - task_key: gold_after_crm
           depends_on:
             - task_key: process_crm
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_pipeline.id}
+        - task_key: platinum_after_crm
+          depends_on:
+            - task_key: gold_after_crm
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
+        - task_key: assert_crm_enriched
+          depends_on:
+            - task_key: platinum_after_crm
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:
@@ -93,10 +275,20 @@ resources:
           depends_on:
             - task_key: seed_ads
           pipeline_task:
-            pipeline_id: ${resources.pipelines.medallion_poc.id}
-        - task_key: assert_complete
+            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+        - task_key: gold_after_ads
           depends_on:
             - task_key: process_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.gold_pipeline.id}
+        - task_key: platinum_after_ads
+          depends_on:
+            - task_key: gold_after_ads
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
+        - task_key: assert_complete
+          depends_on:
+            - task_key: platinum_after_ads
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:
@@ -104,4 +296,3 @@ resources:
               catalog: ${var.catalog}
               schema_prefix: ${var.schema_prefix}
               volume_name: ${var.volume_name}
-

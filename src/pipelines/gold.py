@@ -5,18 +5,16 @@ from __future__ import annotations
 from functools import reduce
 
 from contract_rules import GOLD_EXPECTATIONS
-from pipeline_common import deterministic_key, latest_record, spark, table_name
+from pipeline_common import deterministic_key, latest_record, scoped, spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 
-@dp.materialized_view(name=table_name("gold", "dim_customer"), table_properties={"layer": "gold"})
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_customer"])
+@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_customer"), table_properties={"layer": "gold"}))
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_customer"]))
 def gold_dim_customer():
     customers = spark.read.table(table_name("silver", "erp_customers")).alias("erp")
-    contacts = latest_record(
-        spark.read.table(table_name("silver", "crm_contacts")), ["erp_customer_id"]
-    ).alias("crm")
+    contacts = latest_record(spark.read.table(table_name("silver", "crm_contacts")), ["erp_customer_id"]).alias("crm")
     return customers.join(
         contacts,
         F.col("erp.customer_id") == F.col("crm.erp_customer_id"),
@@ -30,14 +28,12 @@ def gold_dim_customer():
         F.col("crm.email").alias("email"),
         F.col("crm.marketing_consent").alias("marketing_consent"),
         F.col("crm.acquisition_channel").alias("acquisition_channel"),
-        F.when(F.col("crm.contact_id").isNotNull(), "CRM_ENRICHED")
-        .otherwise("ERP_ONLY")
-        .alias("enrichment_status"),
+        F.when(F.col("crm.contact_id").isNotNull(), "CRM_ENRICHED").otherwise("ERP_ONLY").alias("enrichment_status"),
     )
 
 
-@dp.materialized_view(name=table_name("gold", "dim_product"), table_properties={"layer": "gold"})
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_product"])
+@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_product"), table_properties={"layer": "gold"}))
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_product"]))
 def gold_dim_product():
     products = spark.read.table(table_name("silver", "erp_products"))
     return products.select(
@@ -52,8 +48,8 @@ def gold_dim_product():
     )
 
 
-@dp.materialized_view(name=table_name("gold", "dim_campaign"), table_properties={"layer": "gold"})
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_campaign"])
+@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_campaign"), table_properties={"layer": "gold"}))
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_campaign"]))
 def gold_dim_campaign():
     campaigns = spark.read.table(table_name("silver", "ads_campaigns"))
     return campaigns.select(
@@ -64,8 +60,8 @@ def gold_dim_campaign():
     )
 
 
-@dp.materialized_view(name=table_name("gold", "fact_sales"), table_properties={"layer": "gold"})
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_sales"])
+@scoped("gold", dp.materialized_view(name=table_name("gold", "fact_sales"), table_properties={"layer": "gold"}))
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_sales"]))
 def gold_fact_sales():
     lines = spark.read.table(table_name("silver", "erp_order_lines")).alias("line")
     orders = spark.read.table(table_name("silver", "erp_orders")).alias("ord")
@@ -79,25 +75,21 @@ def gold_fact_sales():
         F.col("ord.campaign_code").alias("campaign_code"),
         F.col("line.quantity").alias("quantity"),
         F.col("line.unit_price").alias("unit_price"),
-        (F.col("line.quantity") * F.col("line.unit_price"))
-        .cast("decimal(18,2)")
-        .alias("line_amount"),
+        (F.col("line.quantity") * F.col("line.unit_price")).cast("decimal(18,2)").alias("line_amount"),
         F.col("ord.currency_code").alias("currency_code"),
         F.col("ord.order_status").alias("order_status"),
     )
 
 
-@dp.materialized_view(
-    name=table_name("gold", "fact_attributed_sales"), table_properties={"layer": "gold"}
+@scoped(
+    "gold", dp.materialized_view(name=table_name("gold", "fact_attributed_sales"), table_properties={"layer": "gold"})
 )
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_attributed_sales"])
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_attributed_sales"]))
 def gold_fact_attributed_sales():
     lines = spark.read.table(table_name("silver", "erp_order_lines")).alias("line")
     orders = spark.read.table(table_name("silver", "erp_orders")).alias("ord")
     customers = spark.read.table(table_name("silver", "erp_customers")).alias("customer")
-    contacts = latest_record(
-        spark.read.table(table_name("silver", "crm_contacts")), ["erp_customer_id"]
-    ).alias("crm")
+    contacts = latest_record(spark.read.table(table_name("silver", "crm_contacts")), ["erp_customer_id"]).alias("crm")
     campaigns = spark.read.table(table_name("silver", "ads_campaigns")).alias("campaign")
 
     joined = (
@@ -130,9 +122,7 @@ def gold_fact_attributed_sales():
         .alias("campaign_key"),
         F.col("ord.campaign_code").alias("campaign_code"),
         F.col("crm.acquisition_channel").alias("acquisition_channel"),
-        (F.col("line.quantity") * F.col("line.unit_price"))
-        .cast("decimal(18,2)")
-        .alias("line_amount"),
+        (F.col("line.quantity") * F.col("line.unit_price")).cast("decimal(18,2)").alias("line_amount"),
         F.when(crm_matched & campaign_matched, "COMPLETE")
         .when(crm_matched, "CRM_ENRICHED")
         .otherwise("ERP_ONLY")
@@ -152,10 +142,10 @@ def gold_fact_attributed_sales():
     )
 
 
-@dp.materialized_view(
-    name=table_name("gold", "fact_ad_spend_daily"), table_properties={"layer": "gold"}
+@scoped(
+    "gold", dp.materialized_view(name=table_name("gold", "fact_ad_spend_daily"), table_properties={"layer": "gold"})
 )
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_ad_spend_daily"])
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_ad_spend_daily"]))
 def gold_fact_ad_spend_daily():
     spend = spark.read.table(table_name("silver", "ads_spend"))
     return spend.select(
@@ -181,8 +171,8 @@ def _readiness(source_object: str, source_timestamp: str):
     )
 
 
-@dp.materialized_view(name=table_name("gold", "data_readiness"), table_properties={"layer": "gold"})
-@dp.expect_all_or_fail(GOLD_EXPECTATIONS["data_readiness"])
+@scoped("gold", dp.materialized_view(name=table_name("gold", "data_readiness"), table_properties={"layer": "gold"}))
+@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["data_readiness"]))
 def gold_data_readiness():
     frames = [
         _readiness("erp_customers", "updated_at"),
@@ -194,4 +184,3 @@ def gold_data_readiness():
         _readiness("ads_spend", "updated_at"),
     ]
     return reduce(lambda left, right: left.unionByName(right), frames)
-

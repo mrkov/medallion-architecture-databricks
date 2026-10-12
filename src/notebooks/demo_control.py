@@ -21,7 +21,6 @@ for identifier in (catalog, schema_prefix, volume_name):
 landing_schema = f"{schema_prefix}_landing"
 landing_root = f"/Volumes/{catalog}/{landing_schema}/{volume_name}"
 layer_schema = {layer: f"{schema_prefix}_{layer}" for layer in ("bronze", "silver", "gold", "platinum")}
-pipeline_schema = f"{schema_prefix}_pipeline"
 
 source_directories = (
     "erp/erp_customers",
@@ -38,7 +37,6 @@ def setup_storage(reset: bool) -> None:
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{landing_schema}`")
     for schema in layer_schema.values():
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
-    spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{pipeline_schema}`")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS `{catalog}`.`{landing_schema}`.`{volume_name}`")
     if reset:
         for directory in source_directories:
@@ -150,8 +148,7 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
         "assert_complete": "COMPLETE",
     }[action]
     actual_status = scalar(
-        f"SELECT completeness_status FROM `{catalog}`.`{gold}`.`fact_attributed_sales` "
-        "WHERE order_line_id = 'OL100'"
+        f"SELECT completeness_status FROM `{catalog}`.`{gold}`.`fact_attributed_sales` WHERE order_line_id = 'OL100'"
     )
     require(actual_status == expected_status, f"Expected {expected_status}, got {actual_status}")
     require_unique(f"`{catalog}`.`{gold}`.`fact_sales`", ["order_line_id"])
@@ -160,7 +157,7 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
     require_unique(f"`{catalog}`.`{gold}`.`dim_product`", ["product_key"])
     require(
         scalar(
-            f"SELECT count(*) FROM `{catalog}`.`{silver}`.`contract_quarantine` "
+            f"SELECT count(*) FROM `{catalog}`.`{silver}`.`erp_contract_quarantine` "
             "WHERE business_key = 'P_BAD' AND array_contains(violation_codes, 'HIERARCHY_SEGMENT_COUNT')"
         )
         == 1,
@@ -198,4 +195,3 @@ else:
     raise ValueError(f"Unsupported action: {action}")
 
 print(f"Completed demo action: {action}")
-

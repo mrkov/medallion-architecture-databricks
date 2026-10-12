@@ -12,7 +12,14 @@ if spark is None:
 CATALOG = spark.conf.get("poc.catalog")
 SCHEMA_PREFIX = spark.conf.get("poc.schema_prefix")
 VOLUME_NAME = spark.conf.get("poc.volume_name")
+PIPELINE_SCOPE = spark.conf.get("poc.pipeline_scope")
 LANDING_ROOT = f"/Volumes/{CATALOG}/{SCHEMA_PREFIX}_landing/{VOLUME_NAME}"
+
+VALID_PIPELINE_SCOPES = {"erp", "crm", "ads", "gold", "platinum"}
+if PIPELINE_SCOPE not in VALID_PIPELINE_SCOPES:
+    raise ValueError(
+        f"Unsupported poc.pipeline_scope {PIPELINE_SCOPE!r}; expected one of {sorted(VALID_PIPELINE_SCOPES)}"
+    )
 
 SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
     "erp_customers": (
@@ -80,6 +87,13 @@ def table_name(layer: str, name: str) -> str:
     return f"{CATALOG}.{SCHEMA_PREFIX}_{layer}.{name}"
 
 
+def scoped(scope: str, decorator):
+    """Register a dataset only in the pipeline that owns the requested scope."""
+    if PIPELINE_SCOPE == scope:
+        return decorator
+    return lambda function: function
+
+
 def read_landing(object_name: str) -> DataFrame:
     columns = SOURCE_COLUMNS[object_name]
     source_system = SOURCE_SYSTEM[object_name]
@@ -113,11 +127,10 @@ def latest_record(df: DataFrame, keys: list[str], sequence_column: str = "update
         F.col("_ingested_at").desc(),
         F.col("_source_file").desc(),
     )
-    return df.withColumn("_row_number", F.row_number().over(window)).filter(
-        F.col("_row_number") == 1
-    ).drop("_row_number")
+    return (
+        df.withColumn("_row_number", F.row_number().over(window)).filter(F.col("_row_number") == 1).drop("_row_number")
+    )
 
 
 def deterministic_key(namespace: str, column: str):
     return F.sha2(F.concat_ws("|", F.lit(namespace), F.col(column)), 256)
-
