@@ -140,6 +140,24 @@ was empty because every table name was fully qualified into its actual layer sch
 uses that target. An already-created empty schema may remain after redeployment; the data tables are under
 `medallion_poc_bronze`, `_silver`, `_gold`, and `_platinum`.
 
+### Upgrading from the earlier single-pipeline POC
+
+Unity Catalog tables managed by Lakeflow retain the ID of the pipeline that created them. Before the five
+new pipelines can use the same schema prefix, delete the legacy pipeline and its POC datasets once. Copy the
+legacy pipeline ID from the `TABLE_ALREADY_MANAGED_BY_OTHER_PIPELINE` error, then run:
+
+```bash
+databricks pipelines delete <legacy-pipeline-id> --cascade --profile medallion-poc
+databricks bundle deploy -t dev --profile medallion-poc \
+  --var="catalog=main,schema_prefix=medallion_poc"
+databricks bundle run medallion_poc_demo -t dev --profile medallion-poc \
+  --var="catalog=main,schema_prefix=medallion_poc"
+```
+
+The cascading delete removes every table owned by the legacy monolithic pipeline. The staged demo recreates
+the schemas, source data, and tables under their new pipeline owners. To retain the legacy POC tables, deploy
+with a new dedicated prefix such as `schema_prefix=medallion_poc_v2` instead.
+
 ## Key outputs
 
 | Object | Grain | Purpose |
