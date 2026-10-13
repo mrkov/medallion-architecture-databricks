@@ -16,6 +16,7 @@ from medallion_poc.execution import (
     render_query,
     resolve,
     rules,
+    settings,
 )
 
 spark = SparkSession.getActiveSession()
@@ -71,7 +72,10 @@ def register_bronze(system):
 
 def register_silver(system):
     objects = [
-        CONTRACTS.objects[f"silver.{s.object_name}"] for s in CONTRACTS.sources.values() if s.source_system == system
+        obj
+        for reference, obj in CONTRACTS.objects.items()
+        if reference.startswith("silver.")
+        and source_definition(settings(obj)["inputs"]["raw"].split(".")[1]).source_system == system
     ]
     for obj in objects:
 

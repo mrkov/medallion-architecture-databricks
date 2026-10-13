@@ -104,9 +104,12 @@ def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
     if owner in {"erp", "crm", "ads"}:
         contract = load_yaml(repository_root / f"contracts/source/{owner}.odcs.yaml")
         objects = {element["name"] for element in contract["schema"]}
-        expected = {f"main.{layer}_{owner}.{name}" for layer in ("bronze", "silver") for name in objects} | {
-            f"main.silver_{owner}.contract_quarantine"
-        }
+        silver = load_yaml(repository_root / f"contracts/silver/{owner}.odcs.yaml")
+        expected = (
+            {f"main.bronze_{owner}.{name}" for name in objects}
+            | {element["physicalName"].replace("<catalog>", "main") for element in silver["schema"]}
+            | {f"main.silver_{owner}.contract_quarantine"}
+        )
         assert set(registered_datasets) == expected
         for name in objects:
             bronze = registered_datasets[f"main.bronze_{owner}.{name}"]

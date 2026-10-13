@@ -2,16 +2,16 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d-silver
 name: silver_erp
-version: 2.0.0
+version: 2.1.0
 status: active
 domain: commerce
 customProperties:
 - property: source_system
   value: erp
 description:
-  purpose: Raw ERP interfaces for customers, products, orders, and order lines.
-  usage: Append-only ingestion into the Bronze ERP schema.
-  limitations: Every source field is represented as a string at the Bronze boundary.
+  purpose: Typed ERP interfaces with current records and customer change history.
+  usage: Source-oriented materialized views derived only from Bronze.
+  limitations: Customer updated_at is treated as the business-effective timestamp; only received changes can be reconstructed.
 team:
   name: commerce-data
   members:
@@ -21,7 +21,7 @@ schema:
 - name: erp_customers
   physicalType: materialized view
   logicalType: object
-  dataGranularityDescription: One source record per ERP customer version.
+  dataGranularityDescription: One latest valid row per ERP customer_id.
   properties:
   - name: customer_id
     logicalType: string
@@ -373,3 +373,88 @@ schema:
       row_checks:
         quantity_valid: quantity > 0
         unit_price_valid: unit_price >= 0
+- name: erp_customers_history
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One row per customer_id and effective updated_at where tracked attributes change.
+  properties:
+  - name: customer_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: customer_number
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.customer_number
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: country_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.country_code
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: created_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.created_at
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.erp_customers
+    primaryKey: true
+    primaryKeyPosition: 2
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_erp.erp_customers_history
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.erp_customers
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks: {}
+      history:
+        business_keys:
+        - customer_id
+        sequence_by: updated_at
+        tracked_columns:
+        - customer_number
+        - country_code
+  description: Retains changes to customer_number and country_code; same-time corrections use the latest valid ingestion,
+    and unchanged repeats are collapsed.

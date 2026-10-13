@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d
 name: erp_source_files
-version: 2.0.0
+version: 2.1.0
 status: active
 domain: commerce
 customProperties:
@@ -55,6 +55,31 @@ schema:
         country_code: CH
         created_at: '2026-10-01T09:00:00Z'
         updated_at: '2026-10-01T09:00:00Z'
+      demo_batches:
+        scd2_initial:
+        - customer_id: C_SCD2
+          customer_number: CUST-SCD2
+          country_code: CH
+          created_at: '2026-10-01T09:00:00Z'
+          updated_at: '2026-10-01T09:00:00Z'
+        scd2_move:
+        - customer_id: C_SCD2
+          customer_number: CUST-SCD2
+          country_code: DE
+          created_at: '2026-10-01T09:00:00Z'
+          updated_at: '2026-10-03T00:00:00Z'
+        scd2_repeat:
+        - customer_id: C_SCD2
+          customer_number: CUST-SCD2
+          country_code: DE
+          created_at: '2026-10-01T09:00:00Z'
+          updated_at: '2026-10-04T00:00:00Z'
+        scd2_late:
+        - customer_id: C_SCD2
+          customer_number: CUST-SCD2
+          country_code: AT
+          created_at: '2026-10-01T09:00:00Z'
+          updated_at: '2026-10-02T00:00:00Z'
 - name: erp_products
   physicalType: file
   logicalType: object
@@ -102,6 +127,13 @@ schema:
         product_hierarchy: PHOTOBOOK|PREMIUM|A4
         active_flag: 'true'
         updated_at: '2026-10-01T09:00:00Z'
+      demo_batches:
+        scd2_initial:
+        - product_id: P_SCD2
+          product_name: SCD2 Photo Book
+          product_hierarchy: PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+          active_flag: 'true'
+          updated_at: '2026-10-01T09:00:00Z'
 - name: erp_orders
   physicalType: file
   logicalType: object
@@ -149,6 +181,36 @@ schema:
         currency_code: CHF
         campaign_code: META_FALL_2026
         updated_at: '2026-10-01T10:00:00Z'
+      demo_batches:
+        scd2_initial:
+        - order_id: O_SCD2_EARLY
+          customer_id: C_SCD2
+          order_timestamp: '2026-09-30T10:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: ''
+          updated_at: '2026-09-30T10:00:00Z'
+        - order_id: O_SCD2_BEFORE
+          customer_id: C_SCD2
+          order_timestamp: '2026-10-01T10:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: ''
+          updated_at: '2026-10-01T10:00:00Z'
+        - order_id: O_SCD2_MIDDLE
+          customer_id: C_SCD2
+          order_timestamp: '2026-10-02T10:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: ''
+          updated_at: '2026-10-02T10:00:00Z'
+        - order_id: O_SCD2_AFTER
+          customer_id: C_SCD2
+          order_timestamp: '2026-10-03T00:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: ''
+          updated_at: '2026-10-03T00:00:00Z'
 - name: erp_order_lines
   physicalType: file
   logicalType: object
@@ -191,3 +253,29 @@ schema:
         quantity: '2'
         unit_price: '29.90'
         updated_at: '2026-10-01T10:00:00Z'
+      demo_batches:
+        scd2_initial:
+        - order_line_id: OL_SCD2_EARLY
+          order_id: O_SCD2_EARLY
+          product_id: P_SCD2
+          quantity: '1'
+          unit_price: '29.90'
+          updated_at: '2026-09-30T10:00:00Z'
+        - order_line_id: OL_SCD2_BEFORE
+          order_id: O_SCD2_BEFORE
+          product_id: P_SCD2
+          quantity: '1'
+          unit_price: '29.90'
+          updated_at: '2026-10-01T10:00:00Z'
+        - order_line_id: OL_SCD2_MIDDLE
+          order_id: O_SCD2_MIDDLE
+          product_id: P_SCD2
+          quantity: '1'
+          unit_price: '29.90'
+          updated_at: '2026-10-02T10:00:00Z'
+        - order_line_id: OL_SCD2_AFTER
+          order_id: O_SCD2_AFTER
+          product_id: P_SCD2
+          quantity: '1'
+          unit_price: '29.90'
+          updated_at: '2026-10-03T00:00:00Z'

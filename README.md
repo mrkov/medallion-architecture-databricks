@@ -22,9 +22,9 @@ flowchart LR
 | Schema | Contents | Owner |
 |---|---|---|
 | `bronze_erp`, `bronze_crm`, `bronze_ads` | Append-only streaming tables, all payload columns strings; a `landing` volume in each schema | Respective source pipeline |
-| `silver_erp`, `silver_crm`, `silver_ads` | Typed, deduplicated materialized views and `contract_quarantine` | Respective source pipeline |
+| `silver_erp`, `silver_crm`, `silver_ads` | Typed, deduplicated materialized views, ERP customer change history and `contract_quarantine` | Respective source pipeline |
 | `gold_common` | Persisted facts/dimensions and `data_readiness`, implemented as Lakeflow materialized views | Gold pipeline |
-| `platinum_sales` | Ordinary views: `fact_sales`, `sales_detail`, `dim_customer`, `dim_product` | Published from ODCS |
+| `platinum_sales` | Ordinary views: `fact_sales`, `sales_detail`, `dim_customer`, `dim_product`, `dim_customer_history`, `sales_history` | Published from ODCS |
 | `platinum_marketing` | Ordinary views: `fact_campaign_performance`, `dim_campaign` | Published from ODCS |
 
 There is **no schema prefix**. Set `catalog` to isolate a deployment; schema names are exactly as shown.
@@ -40,7 +40,7 @@ Source jobs have no schedule in this POC; each can acquire an independent schedu
 
 The `refresh_gold` job has a native `table_update` trigger:
 
-- It monitors the seven Silver interfaces referenced by Gold contracts, with `ANY_UPDATED` semantics.
+- It monitors the eight Silver interfaces referenced by Gold contracts, with `ANY_UPDATED` semantics.
 - It waits for 60 seconds without another watched update and allows at least 120 seconds between triggers.
 - Job concurrency is one, with queueing enabled.
 - Its sole task starts a normal Gold pipeline update. Source jobs never call this job.
@@ -59,7 +59,7 @@ batch/completion markers and a readiness gate.
 
 For a larger deployment, use refresh groups based on shared dependencies and freshness requirements, and
 increase the batching window where appropriate. Do not assume one trigger can watch an unlimited number
-of tables: check the workspace's current table-trigger limits. The seven-table example stays small.
+of tables: check the workspace's current table-trigger limits. The eight-table example stays small.
 
 ## Contracts are the executable source of truth
 
@@ -78,8 +78,10 @@ ODCS itself is not a transformation engine.
 | `primaryKey`, `primaryKeyPosition` | Silver deduplication keys and declared output grain |
 | `customProperties.poc.inputs` / `from_sql` | Input references, joins, subqueries and aggregations |
 | `customProperties.poc.order_by` | Silver's deterministic latest-record ordering |
+| `customProperties.poc.history` | Optional Silver business keys, effective timestamp and attributes whose changes create history versions |
 | `customProperties.poc.row_checks` | Named, row-level SQL predicates; false/null causes rejection |
 | `customProperties.poc.demo_rows` on source objects | Sample records for the staged demo |
+| `customProperties.poc.demo_batches` on source objects | Named arrivals for the SCD2 demo |
 
 The `poc` values are an **ODCS custom-property extension defined by this repository**, not a portable ODCS
 execution standard. See [the execution profile](docs/contract-execution.md) for supported syntax and limits.
@@ -87,7 +89,8 @@ Contract files are trusted, reviewed code: changing `transformLogic` changes exe
 that object reads use declared input placeholders and the correct layer. It does not sandbox SQL functions.
 
 Silver applies tolerant casts, records invalid rows in its source's quarantine, and keeps the latest valid
-row per primary key. Gold uses strict casts and failing expectations. Primary-key metadata does not create
+row per primary key. The customer history interface uses a composite customer/time key and additionally
+collapses unchanged repeats. Gold uses strict casts and failing expectations. Primary-key metadata does not create
 a database-enforced uniqueness constraint on a materialized view; the transformations and integration
 tests enforce/check the declared grains. Platinum projections specify columns rather than `SELECT *`.
 
@@ -200,6 +203,22 @@ After changing a Platinum contract, run `publish_platinum_views` once to replace
 Data changes in Gold require no view republication. After changing a Gold expression without a Silver data
 change, explicitly run `refresh_gold` once: table-update triggers monitor data commits, not YAML edits.
 
+## Demonstrate SCD Type 2 customer history
+
+The additional `scd2_demo` job shows a customer moving countries, an unchanged repeat, and a late-arriving
+historical change. It can run after the enrichment demo using separate sample IDs. After installing the
+new definitions with the bootstrap/setup sequence, run:
+
+```bash
+databricks bundle run scd2_demo --profile medallion-poc -t dev --var catalog=main
+```
+
+`gold_common.dim_customer_history` retains versions with `customer_version_key`, `valid_from`, `valid_to`
+and `is_current`. Sales facts derive the version key directly from Silver history using the order timestamp.
+Query `platinum_sales.sales_history` to see historical country values; `sales_detail` keeps current values.
+The demo only ingests ERP and waits for automatically triggered Gold updates. See [the complete walkthrough](docs/scd2.md)
+for upgrade commands, expected rows, contract rules, late-arrival behavior and cost considerations.
+
 ## Edit and validate
 
 Python 3.11+ and Java 17+ are required for local Spark tests:
@@ -220,7 +239,8 @@ generation before committing or enabling automatic refresh.
 When adding a source, also add its two small pipeline entrypoints following the existing source folders.
 
 Local tests execute the actual Silver/Gold/Platinum SQL under Spark ANSI mode, including the three arrival
-stages, output types/grains, invalid values and a changed contract expression/output column. Registration
+stages, SCD2 intervals/temporal joins/late corrections, output types/grains, invalid values and a changed
+contract expression/output column. Registration
 tests simulate Lakeflow without `__file__`; setup and example-file tests check repeatability. These tests
 cannot prove Auto Loader behavior, native trigger delivery, permissions or Lakeflow incremental refresh
 plans: the staged Databricks job is the workspace acceptance test.

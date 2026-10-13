@@ -119,30 +119,35 @@ def resources(contracts, bootstrap=False):
             "tasks": [pipeline_task(f"ingest_{system}", f"{system}_source_pipeline")],
         }
     # The demo observes Gold; it never starts the Gold pipeline or refresh job.
-    scenario = yaml.safe_load((ROOT / "demo/scenario.yaml").read_text())
-    tasks = []
-    previous = None
-    for stage, definition in scenario["stages"].items():
-        seed = notebook(f"seed_{stage}", "demo_arrivals", action="seed", stage=stage)
-        tasks.append(after(seed, previous) if previous else seed)
-        tasks.append(
-            after(
-                {
-                    "task_key": f"ingest_{stage}",
-                    "run_job_task": {"job_id": "${resources.jobs.ingest_" + definition["source"] + ".id}"},
-                },
-                f"seed_{stage}",
+    for scenario_name, job_name, title in [
+        ("scenario", "medallion_poc_demo", "Observe automatic Gold enrichment after staged arrivals"),
+        ("scd2", "scd2_demo", "Observe customer SCD Type 2 history and late arrivals"),
+    ]:
+        scenario = yaml.safe_load((ROOT / f"demo/{scenario_name}.yaml").read_text())
+        tasks = []
+        previous = None
+        for stage, definition in scenario["stages"].items():
+            params = {"stage": stage, "scenario": scenario_name}
+            seed = notebook(f"seed_{stage}", "demo_arrivals", action="seed", **params)
+            tasks.append(after(seed, previous) if previous else seed)
+            tasks.append(
+                after(
+                    {
+                        "task_key": f"ingest_{stage}",
+                        "run_job_task": {"job_id": "${resources.jobs.ingest_" + definition["source"] + ".id}"},
+                    },
+                    f"seed_{stage}",
+                )
             )
-        )
-        tasks.append(
-            after(notebook(f"observe_{stage}", "demo_arrivals", action="wait", stage=stage), f"ingest_{stage}")
-        )
-        previous = f"observe_{stage}"
-    jobs["medallion_poc_demo"] = {
-        "name": "[${bundle.target}] Observe automatic Gold enrichment after staged arrivals",
-        "max_concurrent_runs": 1,
-        "tasks": tasks,
-    }
+            tasks.append(
+                after(notebook(f"observe_{stage}", "demo_arrivals", action="wait", **params), f"ingest_{stage}")
+            )
+            previous = f"observe_{stage}"
+        jobs[job_name] = {
+            "name": "[${bundle.target}] " + title,
+            "max_concurrent_runs": 1,
+            "tasks": tasks,
+        }
     if bootstrap:
         # The Jobs API need not accept watchers on tables that do not exist yet, even when paused.
         # Keep the same job ID; a subsequent normal deployment adds its trigger after setup.

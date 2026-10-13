@@ -45,11 +45,13 @@ def test_late_arrivals_converge_and_every_mart_is_a_gold_view(spark, contracts):
                 + ", _ingested_at TIMESTAMP, _source_file STRING, _source_system STRING, _batch_id STRING"
             )
             spark.createDataFrame(data, schema).createOrReplaceTempView("bronze_" + source.object_name)
-            silver = contracts.objects["silver." + source.object_name]
+        for reference, silver in contracts.objects.items():
+            if not reference.startswith("silver."):
+                continue
             result = accepted_silver(evaluate_silver(spark, silver, local_name), silver)
             # Materialize the local substitute for a persisted Silver output.
             result = spark.createDataFrame(result.collect(), result.schema)
-            result.createOrReplaceTempView("silver_" + source.object_name)
+            result.createOrReplaceTempView(local_name(reference))
         for reference, obj in contracts.objects.items():
             if not reference.startswith("gold."):
                 continue
@@ -87,7 +89,7 @@ def test_publisher_creates_every_mart_as_an_ordinary_view(contracts):
     statements = []
     publish_views(SimpleNamespace(sql=statements.append), contracts, "main")
     expected = [obj for ref, obj in contracts.objects.items() if ref.startswith("platinum.")]
-    assert len(statements) == len(expected) == 6
+    assert len(statements) == len(expected) == 8
     for query, obj in zip(statements, expected, strict=True):
         assert query.startswith("CREATE OR REPLACE VIEW ")
         assert physical_name(obj, "main").replace(".", "`.`") in query

@@ -83,6 +83,21 @@ resources:
       max_concurrent_runs: 1
       queue:
         enabled: true
+      trigger:
+        pause_status: ${var.gold_trigger_status}
+        table_update:
+          condition: ANY_UPDATED
+          table_names:
+          - ${var.catalog}.silver_ads.ads_campaigns
+          - ${var.catalog}.silver_ads.ads_spend
+          - ${var.catalog}.silver_crm.crm_contacts
+          - ${var.catalog}.silver_erp.erp_customers
+          - ${var.catalog}.silver_erp.erp_customers_history
+          - ${var.catalog}.silver_erp.erp_order_lines
+          - ${var.catalog}.silver_erp.erp_orders
+          - ${var.catalog}.silver_erp.erp_products
+          wait_after_last_change_seconds: 60
+          min_time_between_triggers_seconds: 120
       tasks:
       - task_key: refresh_gold
         pipeline_task:
@@ -179,6 +194,7 @@ resources:
             volume_name: ${var.volume_name}
             action: seed
             stage: erp
+            scenario: scenario
       - task_key: ingest_erp
         run_job_task:
           job_id: ${resources.jobs.ingest_erp.id}
@@ -193,6 +209,7 @@ resources:
             volume_name: ${var.volume_name}
             action: wait
             stage: erp
+            scenario: scenario
         depends_on:
         - task_key: ingest_erp
       - task_key: seed_crm
@@ -204,6 +221,7 @@ resources:
             volume_name: ${var.volume_name}
             action: seed
             stage: crm
+            scenario: scenario
         depends_on:
         - task_key: observe_erp
       - task_key: ingest_crm
@@ -220,6 +238,7 @@ resources:
             volume_name: ${var.volume_name}
             action: wait
             stage: crm
+            scenario: scenario
         depends_on:
         - task_key: ingest_crm
       - task_key: seed_ads
@@ -231,6 +250,7 @@ resources:
             volume_name: ${var.volume_name}
             action: seed
             stage: ads
+            scenario: scenario
         depends_on:
         - task_key: observe_crm
       - task_key: ingest_ads
@@ -247,5 +267,124 @@ resources:
             volume_name: ${var.volume_name}
             action: wait
             stage: ads
+            scenario: scenario
         depends_on:
         - task_key: ingest_ads
+    scd2_demo:
+      name: '[${bundle.target}] Observe customer SCD Type 2 history and late arrivals'
+      max_concurrent_runs: 1
+      tasks:
+      - task_key: seed_initial
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: initial
+            scenario: scd2
+      - task_key: ingest_initial
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_initial
+      - task_key: observe_initial
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: initial
+            scenario: scd2
+        depends_on:
+        - task_key: ingest_initial
+      - task_key: seed_move
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: move
+            scenario: scd2
+        depends_on:
+        - task_key: observe_initial
+      - task_key: ingest_move
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_move
+      - task_key: observe_move
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: move
+            scenario: scd2
+        depends_on:
+        - task_key: ingest_move
+      - task_key: seed_repeat
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: repeat
+            scenario: scd2
+        depends_on:
+        - task_key: observe_move
+      - task_key: ingest_repeat
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_repeat
+      - task_key: observe_repeat
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: repeat
+            scenario: scd2
+        depends_on:
+        - task_key: ingest_repeat
+      - task_key: seed_late
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: late
+            scenario: scd2
+        depends_on:
+        - task_key: observe_repeat
+      - task_key: ingest_late
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_late
+      - task_key: observe_late
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: late
+            scenario: scd2
+        depends_on:
+        - task_key: ingest_late

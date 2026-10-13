@@ -2,13 +2,14 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 58d61b9c-e987-45dd-9cb3-fe1ab9368736
 name: platinum_sales_mart
-version: 3.0.0
+version: 3.1.0
 status: active
 domain: sales-analytics
 description:
   purpose: Sales data mart containing an order-line fact, virtual dimensions, and a flattened sales report.
   usage: Semantic models, dashboards, and analytical queries.
-  limitations: Contains the current customer and product descriptions rather than historical SCD snapshots.
+  limitations: sales_detail and dim_customer retain current descriptions; sales_history and dim_customer_history expose ERP
+    customer attributes as of the order timestamp. Product and CRM attributes are not historized.
 team:
   name: analytics-engineering
   members:
@@ -142,8 +143,8 @@ schema:
         sales: gold.fact_sales
         customer: gold.dim_customer
         product: gold.dim_product
-      from_sql: '{{ sales }} AS sales JOIN {{ customer }} AS customer ON sales.customer_key = customer.customer_key JOIN
-        {{ product }} AS product ON sales.product_key = product.product_key'
+      from_sql: '{{ sales }} AS sales JOIN {{ customer }} AS customer ON sales.customer_key = customer.customer_key JOIN {{
+        product }} AS product ON sales.product_key = product.product_key'
 - name: fact_sales
   physicalName: <catalog>.platinum_sales.fact_sales
   physicalType: view
@@ -236,6 +237,13 @@ schema:
     required: true
     physicalType: STRING
     transformLogic: src.order_status
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: src.customer_version_key
     transformSourceObjects:
     - gold.fact_sales
   customProperties:
@@ -399,3 +407,159 @@ schema:
       inputs:
         src: gold.dim_product
       from_sql: '{{ src }} AS src'
+- name: dim_customer_history
+  physicalName: <catalog>.platinum_sales.dim_customer_history
+  physicalType: view
+  logicalType: object
+  dataGranularityDescription: One row per ERP customer attribute version; validity is [valid_from, valid_to).
+  description: SCD Type 2 for ERP customer_number and country_code. CRM enrichment stays in the current dim_customer.
+  properties:
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_version_key
+    transformSourceObjects:
+    - gold.dim_customer_history
+    primaryKey: true
+    primaryKeyPosition: 1
+  - name: customer_key
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_key
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: customer_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: customer_number
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_number
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: country_code
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.country_code
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: valid_from
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src.valid_from
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: valid_to
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: false
+    transformLogic: src.valid_to
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: is_current
+    logicalType: boolean
+    physicalType: BOOLEAN
+    required: true
+    transformLogic: src.is_current
+    transformSourceObjects:
+    - gold.dim_customer_history
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: gold.dim_customer_history
+      from_sql: '{{ src }} AS src'
+- name: sales_history
+  physicalName: <catalog>.platinum_sales.sales_history
+  physicalType: view
+  logicalType: object
+  dataGranularityDescription: One row per ERP order_line_id, with customer attributes valid at the order timestamp.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: sales.order_line_id
+    transformSourceObjects:
+    - gold.fact_sales
+    primaryKey: true
+    primaryKeyPosition: 1
+  - name: order_timestamp
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: sales.order_timestamp
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: customer_key
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: sales.customer_key
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: sales.customer_version_key
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: customer_id
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: history.customer_id
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: customer_number_at_order
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: history.customer_number
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: country_code_at_order
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: history.country_code
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: customer_history_status
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: CASE WHEN history.customer_version_key IS NULL THEN 'MISSING_HISTORY' ELSE 'MATCHED' END
+    transformSourceObjects:
+    - gold.dim_customer_history
+  - name: line_amount
+    logicalType: number
+    physicalType: DECIMAL(18,2)
+    required: true
+    transformLogic: sales.line_amount
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: currency_code
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: sales.currency_code
+    transformSourceObjects:
+    - gold.fact_sales
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        sales: gold.fact_sales
+        history: gold.dim_customer_history
+      from_sql: '{{ sales }} AS sales LEFT JOIN {{ history }} AS history ON sales.customer_version_key = history.customer_version_key'

@@ -96,3 +96,31 @@ def test_demo_wait_reports_a_disabled_or_broken_trigger(contracts, monkeypatch):
         wait_for_assertions(
             spark, [{"name": "late arrival", "query": "SELECT 1", "equals": 1}], contracts, "main", timeout_seconds=0
         )
+
+
+def test_named_demo_batch_writes_only_changed_source_objects_and_is_retryable(contracts):
+    import csv
+    import io
+
+    import pytest
+
+    files = {}
+
+    def put(path, text, overwrite):
+        assert not overwrite and path not in files
+        files[path] = text
+
+    fs = SimpleNamespace(
+        ls=lambda folder: [SimpleNamespace(path=p) for p in files if p.startswith(folder + "/")],
+        put=put,
+        head=lambda path, size: files[path],
+    )
+    dbutils = SimpleNamespace(fs=fs)
+    for _ in range(2):
+        seed_source(dbutils, contracts, "erp", "main", "landing", "scd2_move")
+    assert len(files) == 1
+    path, text = next(iter(files.items()))
+    assert "/erp_customers/" in path
+    assert list(csv.DictReader(io.StringIO(text)))[0]["country_code"] == "DE"
+    with pytest.raises(ValueError, match="No example rows"):
+        seed_source(dbutils, contracts, "erp", "main", "landing", "misspelled_batch")

@@ -1,0 +1,76 @@
+stages:
+  initial:
+    source: erp
+    example_batch: scd2_initial
+    assertions:
+    - name: Only tracked changes create versions
+      query: SELECT count(*) FROM {{ gold.dim_customer_history }} WHERE customer_id = 'C_SCD2'
+      equals: 1
+    - name: Historical country for BEFORE
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_BEFORE'
+      equals: CH
+    - name: Current country follows effective time
+      query: SELECT country_code FROM {{ platinum.dim_customer_history }} WHERE customer_id = 'C_SCD2' AND is_current
+      equals: CH
+    - name: Sale before the first known version stays visible
+      query: SELECT customer_history_status FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_EARLY'
+      equals: MISSING_HISTORY
+    precondition:
+      query: SELECT count(*) FROM {{ bronze.erp_customers }} WHERE customer_id = 'C_SCD2'
+      equals: 0
+      message: The SCD2 demo has already started in this catalog. Repair a failed run at its failed task, or use
+        another catalog for the full sequence. Existing history is preserved.
+  move:
+    source: erp
+    example_batch: scd2_move
+    assertions:
+    - name: Only tracked changes create versions
+      query: SELECT count(*) FROM {{ gold.dim_customer_history }} WHERE customer_id = 'C_SCD2'
+      equals: 2
+    - name: Historical country for BEFORE
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_BEFORE'
+      equals: CH
+    - name: Historical country for MIDDLE
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_MIDDLE'
+      equals: CH
+    - name: Historical country for AFTER
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_AFTER'
+      equals: DE
+    - name: Current country follows effective time
+      query: SELECT country_code FROM {{ platinum.dim_customer_history }} WHERE customer_id = 'C_SCD2' AND is_current
+      equals: DE
+  repeat:
+    source: erp
+    example_batch: scd2_repeat
+    assertions:
+    - name: Only tracked changes create versions
+      query: SELECT count(*) FROM {{ gold.dim_customer_history }} WHERE customer_id = 'C_SCD2'
+      equals: 2
+    - name: Historical country for AFTER
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_AFTER'
+      equals: DE
+    - name: Repeated source state was ingested
+      query: SELECT count(*) FROM {{ bronze.erp_customers }} WHERE customer_id = 'C_SCD2'
+      equals: 3
+  late:
+    source: erp
+    example_batch: scd2_late
+    assertions:
+    - name: Only tracked changes create versions
+      query: SELECT count(*) FROM {{ gold.dim_customer_history }} WHERE customer_id = 'C_SCD2'
+      equals: 3
+    - name: Historical country for BEFORE
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_BEFORE'
+      equals: CH
+    - name: Historical country for MIDDLE
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_MIDDLE'
+      equals: AT
+    - name: Historical country for AFTER
+      query: SELECT country_code_at_order FROM {{ platinum.sales_history }} WHERE order_line_id = 'OL_SCD2_AFTER'
+      equals: DE
+    - name: Current country follows effective time
+      query: SELECT country_code FROM {{ platinum.dim_customer_history }} WHERE customer_id = 'C_SCD2' AND is_current
+      equals: DE
+    - name: One current version remains
+      query: SELECT count(*) FROM {{ gold.dim_customer_history }} WHERE customer_id = 'C_SCD2' AND is_current
+      equals: 1

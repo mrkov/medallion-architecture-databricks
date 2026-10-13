@@ -43,8 +43,12 @@ from medallion_poc.demo import scenario_query, seed_source, wait_for_assertions
 
 dbutils.widgets.dropdown("action", "seed", ["seed", "wait"])
 dbutils.widgets.text("stage", "erp")
+dbutils.widgets.dropdown("scenario", "scenario", ["scenario", "scd2"])
 stage = dbutils.widgets.get("stage")
-scenario = load_yaml(bundle_root / "demo/scenario.yaml")
+scenario_name = dbutils.widgets.get("scenario")
+if scenario_name not in {"scenario", "scd2"}:
+    raise ValueError("Unknown demo scenario")
+scenario = load_yaml(bundle_root / f"demo/{scenario_name}.yaml")
 step = scenario["stages"][stage]
 if dbutils.widgets.get("action") == "seed":
     if "precondition" in step:
@@ -52,7 +56,7 @@ if dbutils.widgets.get("action") == "seed":
         actual = spark.sql(scenario_query(check["query"], contracts, catalog)).first()[0]
         if actual != check["equals"]:
             raise ValueError(check["message"])
-    seed_source(dbutils, contracts, step["source"], catalog, volume_name)
+    seed_source(dbutils, contracts, step["source"], catalog, volume_name, step.get("example_batch"))
 else:
     wait_for_assertions(spark, step["assertions"], contracts, catalog)
 print(f"Completed {dbutils.widgets.get('action')} for {stage}")

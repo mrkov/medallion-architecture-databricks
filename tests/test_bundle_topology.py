@@ -2,6 +2,8 @@ import runpy
 import subprocess
 import sys
 
+import pytest
+
 from medallion_poc.contracts import load_yaml
 from medallion_poc.execution import physical_name, settings
 
@@ -38,9 +40,10 @@ def test_source_jobs_end_at_silver_and_gold_has_table_change_trigger(repository_
     assert gold["queue"]["enabled"]
 
 
-def test_demo_only_ingests_sources_and_observes_results(repository_root):
+@pytest.mark.parametrize("job", ["medallion_poc_demo", "scd2_demo"])
+def test_demo_only_ingests_sources_and_observes_results(repository_root, job):
     resource = load_yaml(repository_root / "resources/medallion_poc.yml")["resources"]
-    demo = resource["jobs"]["medallion_poc_demo"]
+    demo = resource["jobs"][job]
     for task in demo["tasks"]:
         assert "pipeline_task" not in task
         if "run_job_task" in task:

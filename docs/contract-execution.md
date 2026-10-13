@@ -52,6 +52,25 @@ define deduplication. `order_by` supports a contracted column, ASC/DESC, and opt
 stable hash of the projected row resolves remaining ties. Filtering invalid rows precedes deduplication;
 an invalid newest source record does not replace an older valid Silver record.
 
+One Bronze interface may feed multiple Silver objects in its source pipeline. For example, ERP customers
+have both a current-state object and `erp_customers_history`, each reading Bronze directly. An optional
+`poc.history` mapping enables change history in Silver:
+
+```yaml
+history:
+  business_keys: [customer_id]
+  sequence_by: updated_at
+  tracked_columns: [customer_number, country_code]
+```
+
+The declared primary key must contain exactly the business keys and sequence column, all required; the
+sequence must be a TIMESTAMP. After normal quality filtering and per-version deduplication, the executor
+keeps the first row and subsequent changes to the tracked columns using null-safe comparisons. Later
+metadata-only/unchanged repeats are collapsed. Rows retain the sequence timestamp that opens the version.
+Gold contract SQL derives half-open validity intervals with LEAD and constructs version keys. The facts
+derive matching keys from Silver using a temporal join, without reading another Gold object. See
+[SCD2 semantics and the runnable demo](scd2.md) for late events, corrections and missing history.
+
 `required` and `enum` compile to row expectations; `row_checks` adds named predicates over projected
 columns. A false or null predicate rejects a Silver row to `silver_<source>.contract_quarantine`, retaining
 its original Bronze payload, keys, violation codes and file metadata. These are generic operational
@@ -81,3 +100,6 @@ Source object `poc.demo_rows` contains illustrative record dictionaries. The dem
 from the source properties, appending any intentional extra example fields (such as `placement_type`).
 File names hash the content. Existing files are never overwritten. Demo stage expectations are defined
 separately in `demo/scenario.yaml`, and never supply production table definitions.
+Named `poc.demo_batches` maps batch names to example rows for `demo/scd2.yaml`. The writer skips source
+objects without that named batch, rejects an unknown/empty batch, and applies the same immutable-file
+behavior. Both demos observe the independent Gold trigger rather than starting Gold themselves.

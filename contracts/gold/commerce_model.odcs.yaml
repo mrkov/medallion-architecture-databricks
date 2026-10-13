@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 94da63f7-f9fc-4595-8823-aa27ccb16fe9
 name: gold_commerce_model
-version: 2.0.0
+version: 2.1.0
 status: active
 domain: commerce
 description:
@@ -114,8 +114,8 @@ schema:
         customer: silver.erp_customers
         crm: silver.crm_contacts
       from_sql: '{{ customer }} AS customer LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY erp_customer_id
-        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm
-        }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id'
+        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm }}) WHERE
+        contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id'
 - name: dim_product
   physicalType: materialized view
   logicalType: object
@@ -334,6 +334,15 @@ schema:
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: CASE WHEN history.customer_id IS NOT NULL THEN sha2(concat_ws('|', 'customer_version', history.customer_id,
+      CAST(unix_micros(history.updated_at) AS STRING)), 256) END
+    transformSourceObjects:
+    - silver.erp_orders
+    - silver.erp_customers_history
   physicalName: <catalog>.gold_common.fact_sales
   customProperties:
   - property: poc
@@ -341,7 +350,11 @@ schema:
       inputs:
         line: silver.erp_order_lines
         ord: silver.erp_orders
-      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id'
+        history: silver.erp_customers_history
+      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id LEFT JOIN (SELECT *, lead(updated_at)
+        OVER (PARTITION BY customer_id ORDER BY updated_at) AS valid_to FROM {{ history }}) AS history ON ord.customer_id
+        = history.customer_id AND ord.order_timestamp >= history.updated_at AND (ord.order_timestamp < history.valid_to OR
+        history.valid_to IS NULL)'
 - name: fact_attributed_sales
   physicalType: materialized view
   logicalType: object
@@ -447,8 +460,8 @@ schema:
     - value: CRM_ENRICHED
     - value: COMPLETE
     physicalType: STRING
-    transformLogic: CASE WHEN crm.contact_id IS NOT NULL AND campaign.campaign_code IS NOT NULL THEN 'COMPLETE' WHEN
-      crm.contact_id IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
+    transformLogic: CASE WHEN crm.contact_id IS NOT NULL AND campaign.campaign_code IS NOT NULL THEN 'COMPLETE' WHEN crm.contact_id
+      IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -470,8 +483,8 @@ schema:
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: CASE WHEN ord.campaign_code IS NULL THEN 'NOT_PROVIDED' WHEN campaign.campaign_code IS NOT NULL THEN
-      'MATCHED' ELSE 'MISSING' END
+    transformLogic: CASE WHEN ord.campaign_code IS NULL THEN 'NOT_PROVIDED' WHEN campaign.campaign_code IS NOT NULL THEN 'MATCHED'
+      ELSE 'MISSING' END
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -489,6 +502,15 @@ schema:
     - silver.erp_customers
     - silver.crm_contacts
     - silver.ads_campaigns
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: CASE WHEN history.customer_id IS NOT NULL THEN sha2(concat_ws('|', 'customer_version', history.customer_id,
+      CAST(unix_micros(history.updated_at) AS STRING)), 256) END
+    transformSourceObjects:
+    - silver.erp_orders
+    - silver.erp_customers_history
   physicalName: <catalog>.gold_common.fact_attributed_sales
   customProperties:
   - property: poc
@@ -499,11 +521,14 @@ schema:
         customer: silver.erp_customers
         crm: silver.crm_contacts
         campaign: silver.ads_campaigns
+        history: silver.erp_customers_history
       from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id JOIN {{ customer }} AS customer
-        ON ord.customer_id = customer.customer_id LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY
-        erp_customer_id ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank
-        FROM {{ crm }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id LEFT JOIN {{ campaign
-        }} AS campaign ON ord.campaign_code = campaign.campaign_code'
+        ON ord.customer_id = customer.customer_id LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY erp_customer_id
+        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm }}) WHERE
+        contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id LEFT JOIN {{ campaign }} AS campaign ON ord.campaign_code
+        = campaign.campaign_code LEFT JOIN (SELECT *, lead(updated_at) OVER (PARTITION BY customer_id ORDER BY updated_at)
+        AS valid_to FROM {{ history }}) AS history ON ord.customer_id = history.customer_id AND ord.order_timestamp >= history.updated_at
+        AND (ord.order_timestamp < history.valid_to OR history.valid_to IS NULL)'
 - name: fact_ad_spend_daily
   physicalType: materialized view
   logicalType: object
@@ -665,3 +690,78 @@ schema:
         UNION ALL
         SELECT 'ads_spend' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ ads_spend }}
         ) AS readiness
+- name: dim_customer_history
+  physicalName: <catalog>.gold_common.dim_customer_history
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One row per ERP customer attribute version; validity is [valid_from, valid_to).
+  description: SCD Type 2 for ERP customer_number and country_code. CRM enrichment stays in the current dim_customer.
+  properties:
+  - name: customer_version_key
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: sha2(concat_ws('|', 'customer_version', src.customer_id, CAST(unix_micros(src.updated_at) AS STRING)),
+      256)
+    transformSourceObjects:
+    - silver.erp_customers_history
+    primaryKey: true
+    primaryKeyPosition: 1
+  - name: customer_key
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: sha2(concat_ws('|', 'customer', src.customer_id), 256)
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: customer_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: customer_number
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.customer_number
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: country_code
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src.country_code
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: valid_from
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: valid_to
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: false
+    transformLogic: lead(src.updated_at) OVER (PARTITION BY src.customer_id ORDER BY src.updated_at)
+    transformSourceObjects:
+    - silver.erp_customers_history
+  - name: is_current
+    logicalType: boolean
+    physicalType: BOOLEAN
+    required: true
+    transformLogic: (lead(src.updated_at) OVER (PARTITION BY src.customer_id ORDER BY src.updated_at)) IS NULL
+    transformSourceObjects:
+    - silver.erp_customers_history
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: silver.erp_customers_history
+      from_sql: '{{ src }} AS src'
+      row_checks:
+        VALID_INTERVAL: valid_to IS NULL OR valid_to > valid_from
+        CURRENT_INTERVAL: is_current = (valid_to IS NULL)

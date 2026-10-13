@@ -10,13 +10,20 @@ from decimal import Decimal
 from medallion_poc.execution import physical_name, quote, resolve, settings
 
 
-def seed_source(dbutils, contracts, source_system, catalog, volume):
+def seed_source(dbutils, contracts, source_system, catalog, volume, example_batch=None):
     selected = [s for s in contracts.sources.values() if s.source_system == source_system]
     if not selected:
         raise ValueError(f"Unknown source: {source_system}")
+    batches = []
     for source in selected:
         obj = contracts.objects[f"source.{source.object_name}"]
-        rows = settings(obj)["demo_rows"]
+        config = settings(obj)
+        rows = config["demo_rows"] if example_batch is None else config.get("demo_batches", {}).get(example_batch)
+        if rows:
+            batches.append((source, obj, rows))
+    if not batches:
+        raise ValueError(f"No example rows for {source_system}: {example_batch}")
+    for source, obj, rows in batches:
         extras = sorted({key for row in rows for key in row} - set(source.columns))
         buffer = io.StringIO()
         writer = csv.DictWriter(buffer, fieldnames=[*source.columns, *extras], lineterminator="\n")

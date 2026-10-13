@@ -108,7 +108,7 @@ def validate_catalog(catalog) -> None:
         if layer in {"silver", "gold"} and obj["physicalType"] != "materialized view":
             raise ValueError(f"{reference} must declare physicalType: materialized view")
         config = settings(obj)
-        unknown = set(config) - {"inputs", "from_sql", "order_by", "row_checks"}
+        unknown = set(config) - {"inputs", "from_sql", "order_by", "row_checks", "history"}
         if unknown:
             raise ValueError(f"Unsupported execution settings in {reference}: {sorted(unknown)}")
         allowed = {"silver": "bronze", "gold": "silver", "platinum": "gold"}[layer]
@@ -144,6 +144,36 @@ def validate_catalog(catalog) -> None:
                 match = ORDER.fullmatch(value)
                 if not match or match[1] not in columns:
                     raise ValueError(f"{reference}: order_by must name a contracted column and ASC/DESC")
+        if "history" in config:
+            history = config["history"]
+            if (
+                layer != "silver"
+                or not isinstance(history, dict)
+                or set(history) != {"business_keys", "sequence_by", "tracked_columns"}
+            ):
+                raise ValueError(f"{reference}: history needs Silver business_keys, sequence_by and tracked_columns")
+            business_keys, tracked = history["business_keys"], history["tracked_columns"]
+            sequence = history["sequence_by"]
+            if (
+                not isinstance(business_keys, list)
+                or not business_keys
+                or not isinstance(tracked, list)
+                or not tracked
+                or not all(isinstance(c, str) and c in columns for c in [*business_keys, *tracked])
+                or not isinstance(sequence, str)
+                or sequence not in columns
+                or len(set(business_keys)) != len(business_keys)
+                or len(set(tracked)) != len(tracked)
+                or set(business_keys) & set(tracked)
+                or sequence in [*business_keys, *tracked]
+                or set(keys(obj)) != {*business_keys, sequence}
+            ):
+                raise ValueError(f"{reference}: history must use distinct declared columns and version primary keys")
+            properties = {p["name"]: p for p in obj["properties"]}
+            if properties[sequence]["physicalType"].upper() != "TIMESTAMP" or any(
+                not properties[c].get("required") for c in [*business_keys, sequence]
+            ):
+                raise ValueError(f"{reference}: history keys must be required and sequence_by must be a TIMESTAMP")
         if layer == "platinum" and obj["physicalType"] != "view":
             raise ValueError(f"{reference} must be an ordinary view")
 
@@ -171,9 +201,21 @@ def accepted_silver(frame, obj: dict):
     # A stable payload hash breaks equal source timestamps/file names without arbitrary winners.
     order.append(F.sha2(F.to_json(F.struct(*[F.col(p["name"]) for p in obj["properties"]])), 256).desc())
     window = Window.partitionBy(*keys(obj)).orderBy(*order)
-    return (
+    result = (
         frame.filter(F.size("_contract_violations") == 0)
         .withColumn("_rank", F.row_number().over(window))
         .filter(F.col("_rank") == 1)
         .drop("_rank", "_contract_violations", "_raw_payload")
     )
+    history = settings(obj).get("history")
+    if history:
+        # Deduplicate each effective timestamp first, then retain only attribute changes.
+        # Re-evaluating Bronze history allows late events to split existing intervals.
+        timeline = Window.partitionBy(*history["business_keys"]).orderBy(history["sequence_by"])
+        state = F.struct(*[F.col(c) for c in history["tracked_columns"]])
+        result = (
+            result.withColumn("_history_previous", F.lag(state).over(timeline))
+            .filter(~state.eqNullSafe(F.col("_history_previous")))
+            .drop("_history_previous")
+        )
+    return result
