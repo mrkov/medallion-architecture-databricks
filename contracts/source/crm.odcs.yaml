@@ -5,6 +5,8 @@ name: crm_source_files
 version: 1.0.0
 status: active
 domain: customer
+customProperties:
+  - {property: source_system, value: crm}
 description:
   purpose: CRM contact data arriving independently from ERP orders.
   usage: Append-only ingestion into the Bronze CRM schema.

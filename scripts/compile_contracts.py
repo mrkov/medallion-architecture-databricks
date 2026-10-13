@@ -1,4 +1,4 @@
-"""Compile ODCS required/enum constraints into Lakeflow expectation dictionaries."""
+"""Compile ODCS source interfaces and constraints into pipeline definitions."""
 
 from __future__ import annotations
 
@@ -6,17 +6,18 @@ import argparse
 import pprint
 import sys
 from pathlib import Path
+from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from medallion_poc.contracts import compile_object, validate_contract  # noqa: E402
+from medallion_poc.contracts import compile_object, compile_source_objects, validate_contract  # noqa: E402
 
 SCHEMA = ROOT / "contracts" / "schema" / "odcs-json-schema-v3.2.0.json"
 DESTINATION = ROOT / "src" / "pipelines" / "contract_rules.py"
 
 
-def compiled_rules() -> dict[str, dict[str, dict[str, str]]]:
+def compiled_definitions() -> dict[str, Any]:
     groups: dict[str, dict[str, dict[str, str]]] = {
         "SOURCE_EXPECTATIONS": {},
         "SILVER_EXPECTATIONS": {},
@@ -29,14 +30,29 @@ def compiled_rules() -> dict[str, dict[str, dict[str, str]]]:
         "gold": "GOLD_EXPECTATIONS",
         "platinum": "PLATINUM_EXPECTATIONS",
     }
+    source_columns: dict[str, tuple[str, ...]] = {}
+    source_systems: dict[str, str] = {}
+    source_schemas: dict[str, str] = {}
     for directory, constant in contract_roots.items():
         for path in sorted((ROOT / "contracts" / directory).glob("*.odcs.yaml")):
             contract = validate_contract(path, SCHEMA)
+            if directory == "source":
+                for source in compile_source_objects(contract):
+                    if source.object_name in source_columns:
+                        raise ValueError(f"Source object {source.object_name!r} is declared by multiple contracts")
+                    source_columns[source.object_name] = source.columns
+                    source_systems[source.object_name] = source.source_system
+                    source_schemas[source.object_name] = source.spark_schema
             for element in contract.get("schema", []):
-                groups[constant][element["name"]] = compile_object(
-                    contract, element["name"]
-                ).expectations
-    return groups
+                if element["name"] in groups[constant]:
+                    raise ValueError(f"Duplicate object {element['name']!r} in {directory} contracts: {path}")
+                groups[constant][element["name"]] = compile_object(contract, element["name"]).expectations
+    return {
+        "SOURCE_COLUMNS": source_columns,
+        "SOURCE_SYSTEM": source_systems,
+        "SOURCE_SCHEMAS": source_schemas,
+        **groups,
+    }
 
 
 def render() -> str:
@@ -44,8 +60,8 @@ def render() -> str:
         '"""Generated from ODCS contracts by scripts/compile_contracts.py."""',
         "",
     ]
-    for name, rules in compiled_rules().items():
-        sections.extend([f"{name} = {pprint.pformat(rules, sort_dicts=True, width=100)}", ""])
+    for name, definitions in compiled_definitions().items():
+        sections.extend([f"{name} = {pprint.pformat(definitions, sort_dicts=True, width=100)}", ""])
     sections.append("SILVER_PRODUCT_EXPECTATIONS = SILVER_EXPECTATIONS['erp_products']")
     sections.append("")
     return "\n".join(sections)
@@ -59,9 +75,9 @@ def main() -> int:
     if args.check:
         actual = DESTINATION.read_text(encoding="utf-8") if DESTINATION.exists() else ""
         if actual != expected:
-            print(f"Generated contract rules are stale: {DESTINATION}", file=sys.stderr)
+            print(f"Generated contract definitions are stale: {DESTINATION}", file=sys.stderr)
             return 1
-        print("Generated contract rules are current")
+        print("Generated contract definitions are current")
         return 0
     DESTINATION.write_text(expected, encoding="utf-8")
     print(f"Wrote {DESTINATION}")
@@ -70,4 +86,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

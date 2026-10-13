@@ -20,7 +20,7 @@ jobs:
         run: uv sync --locked --extra dev
       - name: Fetch and verify ODCS v3.2.0 schema
         run: .venv/bin/python scripts/fetch_odcs_schema.py
-      - name: Verify compiled Lakeflow rules
+      - name: Verify compiled ingestion definitions and Lakeflow rules
         run: .venv/bin/python scripts/compile_contracts.py --check
       - name: Run tests
         run: .venv/bin/pytest

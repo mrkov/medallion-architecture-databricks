@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from pipeline_common import SOURCE_COLUMNS, latest_record, spark, table_name
+from contract_rules import SOURCE_COLUMNS
+from pipeline_common import latest_record, spark, table_name
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 

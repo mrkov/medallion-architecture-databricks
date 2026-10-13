@@ -122,3 +122,59 @@ def test_configured_pipeline_registers_only_its_contracted_tables(
             }
         assert set(registered_datasets) == expected
         assert all(value["expectations"]["policy"] == "fail" for value in registered_datasets.values())
+
+
+def test_read_landing_consumes_contract_definitions(repository_root, monkeypatch, registered_datasets):
+    class Expression:
+        def __init__(self, name):
+            self.name = name
+
+        def cast(self, _type):
+            return self
+
+        def alias(self, name):
+            return Expression(name)
+
+    class Reader:
+        def format(self, format_name):
+            self.format_name = format_name
+            return self
+
+        def option(self, _name, _value):
+            return self
+
+        def schema(self, ddl):
+            self.ddl = ddl
+            return self
+
+        def load(self, path):
+            self.path = path
+            return self
+
+        def select(self, *expressions):
+            self.selected = [expression.name for expression in expressions]
+            return self
+
+        def withColumn(self, _name, _expression):
+            return self
+
+    # A contract can add a raw field and change its source route without changing pipeline_common.py.
+    definitions = ModuleType("contract_rules")
+    definitions.SOURCE_COLUMNS = {"source_customers": ("business_id", "new_contract_field")}
+    definitions.SOURCE_SYSTEM = {"source_customers": "declared_source"}
+    definitions.SOURCE_SCHEMAS = {"source_customers": "business_id STRING, new_contract_field STRING"}
+    monkeypatch.setitem(sys.modules, "contract_rules", definitions)
+    reader = Reader()
+    spark = sys.modules["pyspark.sql"].SparkSession.getActiveSession()
+    spark.readStream = reader
+    functions = sys.modules["pyspark.sql.functions"]
+    functions.col = Expression
+    functions.lit = Expression
+    functions.current_timestamp = lambda: Expression("timestamp")
+    functions.regexp_extract = lambda *args: Expression("batch_id")
+    module = runpy.run_path(str(repository_root / "src/pipelines/pipeline_common.py"))
+    assert module["read_landing"]("source_customers") is reader
+    assert reader.format_name == "cloudFiles"
+    assert reader.ddl == definitions.SOURCE_SCHEMAS["source_customers"]
+    assert reader.path == "/Volumes/main/poc_landing/landing/declared_source/source_customers"
+    assert reader.selected == ["business_id", "new_contract_field", "_rescued_data", "_source_file"]

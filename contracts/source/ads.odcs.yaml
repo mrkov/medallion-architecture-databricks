@@ -5,6 +5,8 @@ name: advertising_source_files
 version: 1.0.0
 status: active
 domain: marketing
+customProperties:
+  - {property: source_system, value: ads}
 description:
   purpose: Campaign metadata and daily advertising spend arriving after ERP and CRM.
   usage: Append-only ingestion into the Bronze advertising schema.

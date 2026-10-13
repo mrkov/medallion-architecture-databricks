@@ -5,6 +5,8 @@ name: erp_source_files
 version: 1.0.0
 status: active
 domain: commerce
+customProperties:
+  - {property: source_system, value: erp}
 description:
   purpose: Raw ERP interfaces for customers, products, orders, and order lines.
   usage: Append-only ingestion into the Bronze ERP schema.

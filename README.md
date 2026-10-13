@@ -135,12 +135,43 @@ The ODCS schema is fetched from the immutable `v3.2.0` Git tag and verified agai
 python scripts/fetch_odcs_schema.py
 ```
 
-`scripts/compile_contracts.py` validates every contract and compiles required-field and enum constraints into Lakeflow expectation dictionaries:
+The source ODCS contracts are the source of truth for ingestion interfaces. Each source contract declares
+its landing source system using an ODCS custom property:
+
+```yaml
+customProperties:
+  - property: source_system
+    value: erp
+```
+
+Its `schema[].properties` define payload column names and their order. Source payloads must have
+`logicalType: string` to preserve the Bronze raw-data rule; the compiler rejects typed Bronze payloads,
+duplicate fields, and conflicts with ingestion metadata.
+
+`scripts/compile_contracts.py` validates every contract and generates
+[`contract_rules.py`](src/pipelines/contract_rules.py) with:
+
+- `SOURCE_COLUMNS`: ordered payload fields from source contracts.
+- `SOURCE_SYSTEM`: landing directory and source tags from `source_system` metadata.
+- `SOURCE_SCHEMAS`: raw string schemas consumed by Auto Loader.
+- Lakeflow expectation dictionaries compiled from required-field and enum constraints.
+
+`pipeline_common.py` imports these generated definitions instead of maintaining its own column lists or
+source mappings. Silver uses the same generated columns to capture rejected raw payloads. The generated
+Python file is a deployment artifact; edit ODCS contracts and regenerate it rather than editing it directly.
+The pipeline runtime does not need a YAML parser or ODCS schema validator.
+
+After a contract edit, regenerate, check, and deploy:
 
 ```bash
 python scripts/compile_contracts.py
 python scripts/compile_contracts.py --check
 ```
+
+CI runs `--check` and fails when the generated artifact differs from the contracts. Tests demonstrate that
+an optional source field is added to the generated ingestion schema after regeneration, and that changing
+source-system metadata changes the generated landing route. The Python transformation code still implements
+Silver cleaning and derived columns; the compiler does not execute arbitrary contract transformation text.
 
 Contract compatibility tests allow nullable additions and flag removals, type changes, newly required fields, and removed objects as breaking changes.
 

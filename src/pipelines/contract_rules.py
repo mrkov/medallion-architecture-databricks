@@ -1,5 +1,56 @@
 """Generated from ODCS contracts by scripts/compile_contracts.py."""
 
+SOURCE_COLUMNS = {'ads_campaigns': ('campaign_code', 'campaign_name', 'platform', 'updated_at'),
+ 'ads_spend': ('spend_date',
+               'campaign_code',
+               'spend_amount',
+               'clicks',
+               'impressions',
+               'updated_at'),
+ 'crm_contacts': ('contact_id',
+                  'erp_customer_id',
+                  'email',
+                  'marketing_consent',
+                  'acquisition_channel',
+                  'updated_at'),
+ 'erp_customers': ('customer_id', 'customer_number', 'country_code', 'created_at', 'updated_at'),
+ 'erp_order_lines': ('order_line_id',
+                     'order_id',
+                     'product_id',
+                     'quantity',
+                     'unit_price',
+                     'updated_at'),
+ 'erp_orders': ('order_id',
+                'customer_id',
+                'order_timestamp',
+                'order_status',
+                'currency_code',
+                'campaign_code',
+                'updated_at'),
+ 'erp_products': ('product_id', 'product_name', 'product_hierarchy', 'active_flag', 'updated_at')}
+
+SOURCE_SYSTEM = {'ads_campaigns': 'ads',
+ 'ads_spend': 'ads',
+ 'crm_contacts': 'crm',
+ 'erp_customers': 'erp',
+ 'erp_order_lines': 'erp',
+ 'erp_orders': 'erp',
+ 'erp_products': 'erp'}
+
+SOURCE_SCHEMAS = {'ads_campaigns': 'campaign_code STRING, campaign_name STRING, platform STRING, updated_at STRING',
+ 'ads_spend': 'spend_date STRING, campaign_code STRING, spend_amount STRING, clicks STRING, '
+              'impressions STRING, updated_at STRING',
+ 'crm_contacts': 'contact_id STRING, erp_customer_id STRING, email STRING, marketing_consent '
+                 'STRING, acquisition_channel STRING, updated_at STRING',
+ 'erp_customers': 'customer_id STRING, customer_number STRING, country_code STRING, created_at '
+                  'STRING, updated_at STRING',
+ 'erp_order_lines': 'order_line_id STRING, order_id STRING, product_id STRING, quantity STRING, '
+                    'unit_price STRING, updated_at STRING',
+ 'erp_orders': 'order_id STRING, customer_id STRING, order_timestamp STRING, order_status STRING, '
+               'currency_code STRING, campaign_code STRING, updated_at STRING',
+ 'erp_products': 'product_id STRING, product_name STRING, product_hierarchy STRING, active_flag '
+                 'STRING, updated_at STRING'}
+
 SOURCE_EXPECTATIONS = {'ads_campaigns': {'campaign_code_not_null': 'campaign_code IS NOT NULL',
                    'campaign_name_not_null': 'campaign_name IS NOT NULL',
                    'platform_not_null': 'platform IS NOT NULL',
