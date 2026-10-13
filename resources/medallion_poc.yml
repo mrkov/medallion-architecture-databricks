@@ -8,6 +8,9 @@ resources:
       serverless: true
       continuous: false
       photon: true
+      environment:
+        dependencies:
+          - open-data-contract-standard==3.2.0
       libraries:
         - glob:
             include: ../src/pipelines/erp/**
@@ -24,6 +27,9 @@ resources:
       serverless: true
       continuous: false
       photon: true
+      environment:
+        dependencies:
+          - open-data-contract-standard==3.2.0
       libraries:
         - glob:
             include: ../src/pipelines/crm/**
@@ -40,6 +46,9 @@ resources:
       serverless: true
       continuous: false
       photon: true
+      environment:
+        dependencies:
+          - open-data-contract-standard==3.2.0
       libraries:
         - glob:
             include: ../src/pipelines/ads/**
@@ -56,6 +65,9 @@ resources:
       serverless: true
       continuous: false
       photon: true
+      environment:
+        dependencies:
+          - open-data-contract-standard==3.2.0
       libraries:
         - file:
             path: ../src/pipelines/gold.py
@@ -73,6 +85,9 @@ resources:
       serverless: true
       continuous: false
       photon: true
+      environment:
+        dependencies:
+          - open-data-contract-standard==3.2.0
       libraries:
         - file:
             path: ../src/pipelines/platinum.py

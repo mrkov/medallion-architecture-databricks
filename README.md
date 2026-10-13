@@ -38,7 +38,7 @@ src/pipelines/
 ├── platinum.py
 ├── pipeline_common.py
 ├── silver_common.py
-└── contract_rules.py
+└── contract_loader.py
 ```
 
 Each source pipeline includes only its own folder. Gold and Platinum each include their own definition file.
@@ -145,33 +145,40 @@ customProperties:
 ```
 
 Its `schema[].properties` define payload column names and their order. Source payloads must have
-`logicalType: string` to preserve the Bronze raw-data rule; the compiler rejects typed Bronze payloads,
+`logicalType: string` to preserve the Bronze raw-data rule; the loader rejects typed Bronze payloads,
 duplicate fields, and conflicts with ingestion metadata.
 
-`scripts/compile_contracts.py` validates every contract and generates
-[`contract_rules.py`](src/pipelines/contract_rules.py) with:
+The pipelines load the deployed YAML directly with the
+[`open-data-contract-standard`](https://github.com/datacontract/open-data-contract-standard-python) Python
+library, pinned to `3.2.0` to match the standard used by the POC:
 
-- `SOURCE_COLUMNS`: ordered payload fields from source contracts.
-- `SOURCE_SYSTEM`: landing directory and source tags from `source_system` metadata.
-- `SOURCE_SCHEMAS`: raw string schemas consumed by Auto Loader.
-- Lakeflow expectation dictionaries compiled from required-field and enum constraints.
+```python
+from open_data_contract_standard.model import OpenDataContractStandard
 
-`pipeline_common.py` imports these generated definitions instead of maintaining its own column lists or
-source mappings. Silver uses the same generated columns to capture rejected raw payloads. The generated
-Python file is a deployment artifact; edit ODCS contracts and regenerate it rather than editing it directly.
-The pipeline runtime does not need a YAML parser or ODCS schema validator.
-
-After a contract edit, regenerate, check, and deploy:
-
-```bash
-python scripts/compile_contracts.py
-python scripts/compile_contracts.py --check
+contract = OpenDataContractStandard.from_file("contracts/source/erp.odcs.yaml")
 ```
 
-CI runs `--check` and fails when the generated artifact differs from the contracts. Tests demonstrate that
-an optional source field is added to the generated ingestion schema after regeneration, and that changing
-source-system metadata changes the generated landing route. The Python transformation code still implements
-Silver cleaning and derived columns; the compiler does not execute arbitrary contract transformation text.
+[`contract_loader.py`](src/pipelines/contract_loader.py) loads the contracts when the pipeline process
+initializes. The runtime derives the ordered payload fields, landing source identifiers, raw Spark schemas,
+and supported Lakeflow expectations from those YAML models. `pipeline_common.py` obtains the interface for
+the requested source object; Silver uses that same interface when capturing rejected raw payloads.
+
+There are no generated Python column lists or expectation artifacts. Bundle sync uploads the YAML files,
+and each serverless pipeline's `environment.dependencies` installs `open-data-contract-standard==3.2.0`.
+Paths are resolved relative to the deployed modules, so the runtime does not depend on the working directory.
+
+After editing a contract, validate locally, deploy the bundle, and start the relevant pipeline:
+
+```bash
+python scripts/validate_contracts.py
+```
+
+CI validates the original YAML against the pinned official ODCS JSON schema and exercises the same library
+loader used by the pipelines. Tests demonstrate that editing YAML alone changes raw columns, landing routes,
+and required-field/enum expectations at initialization. A running pipeline uses the snapshot loaded into its
+process; YAML is not reread for every row. The library reads contract definitions, while Lakeflow expectations
+and Python transformations perform the data validation and cleaning. Arbitrary contract transformation text
+is not executed as code.
 
 Contract compatibility tests allow nullable additions and flag removals, type changes, newly required fields, and removed objects as breaking changes.
 
@@ -194,12 +201,14 @@ Python 3.11 or newer and `uv` are recommended:
 ```bash
 UV_CACHE_DIR=/tmp/medallion-uv-cache uv sync --extra dev
 .venv/bin/python scripts/fetch_odcs_schema.py
-.venv/bin/python scripts/compile_contracts.py --check
+.venv/bin/python scripts/validate_contracts.py
 .venv/bin/pytest
 .venv/bin/ruff check .
 ```
 
-These checks validate ODCS files, generated Lakeflow rules, compatibility behavior, layer dependencies, and delimiter edge cases. Spark execution requires Databricks because Lakeflow decorators and Auto Loader are runtime features.
+These checks validate ODCS files, runtime contract loading, expectation derivation, compatibility behavior,
+layer dependencies, and delimiter edge cases. Spark execution requires Databricks because Lakeflow decorators
+and Auto Loader are runtime features.
 
 ## Deploy and run
 

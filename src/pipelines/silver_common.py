@@ -2,14 +2,14 @@
 
 from __future__ import annotations
 
-from contract_rules import SOURCE_COLUMNS
+from contract_loader import source_definition
 from pipeline_common import latest_record, spark, table_name
 from pyspark.sql import DataFrame
 from pyspark.sql import functions as F
 
 
 def read_bronze(object_name: str) -> DataFrame:
-    columns = SOURCE_COLUMNS[object_name]
+    columns = source_definition(object_name).columns
     return spark.read.table(table_name("bronze", object_name)).withColumn(
         "_raw_payload", F.to_json(F.struct(*(F.col(column) for column in columns)))
     )

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import reduce
 
-from contract_rules import GOLD_EXPECTATIONS
+from contract_loader import GOLD_EXPECTATIONS
 from pipeline_common import deterministic_key, latest_record, spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F

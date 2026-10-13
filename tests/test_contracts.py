@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import copy
-import runpy
 import shutil
 import subprocess
 import sys
@@ -9,12 +8,14 @@ from pathlib import Path
 
 import pytest
 import yaml
+from open_data_contract_standard.model import OpenDataContractStandard
 
 from medallion_poc.contracts import (
     breaking_changes,
     compile_object,
-    compile_source_objects,
+    load_contract_catalog,
     load_yaml,
+    source_interfaces,
     validate_contract,
 )
 
@@ -65,7 +66,7 @@ def test_source_contract_controls_column_order_raw_types_and_source_route(reposi
     contract["schema"][0]["properties"].insert(
         1, {"name": "optional_customer_label", "logicalType": "string", "required": False}
     )
-    customers = compile_source_objects(contract)[0]
+    customers = source_interfaces(contract)[0]
     assert customers.source_system == "replacement_erp"
     assert customers.columns[:3] == ("customer_id", "optional_customer_label", "customer_number")
     assert customers.spark_schema.startswith(
@@ -77,7 +78,7 @@ def test_source_contract_controls_column_order_raw_types_and_source_route(reposi
 @pytest.mark.parametrize(
     "invalid", ["missing_source", "unsafe_source", "typed_bronze", "duplicate_column", "metadata_column"]
 )
-def test_invalid_ingestion_contracts_fail_compilation(repository_root, invalid):
+def test_invalid_ingestion_contracts_fail_validation(repository_root, invalid):
     contract = load_yaml(repository_root / "contracts/source/crm.odcs.yaml")
     properties = contract["schema"][0]["properties"]
     if invalid == "missing_source":
@@ -91,51 +92,69 @@ def test_invalid_ingestion_contracts_fail_compilation(repository_root, invalid):
     else:
         properties.append({"name": "_ingested_at", "logicalType": "string"})
     with pytest.raises(ValueError):
-        compile_source_objects(contract)
+        source_interfaces(contract)
 
 
-def test_contract_edit_requires_regeneration_and_updates_ingestion_definitions(repository_root, tmp_path):
-    for directory in ("contracts", "src"):
-        shutil.copytree(repository_root / directory, tmp_path / directory, ignore=shutil.ignore_patterns("__pycache__"))
-    (tmp_path / "scripts").mkdir()
-    shutil.copy2(repository_root / "scripts/compile_contracts.py", tmp_path / "scripts/compile_contracts.py")
+def test_yaml_edit_changes_ingestion_and_expectations_without_regeneration(repository_root, tmp_path):
+    shutil.copytree(repository_root / "contracts", tmp_path / "contracts")
+    before = load_contract_catalog(tmp_path / "contracts")
     contract_path = tmp_path / "contracts/source/ads.odcs.yaml"
     contract = load_yaml(contract_path)
     contract["schema"][0]["properties"].append({"name": "placement_type", "logicalType": "string", "required": False})
     contract["customProperties"][0]["value"] = "paid_media"
     contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
 
-    def run_compiler(*arguments):
-        return subprocess.run(
-            [sys.executable, "scripts/compile_contracts.py", *arguments],
-            cwd=tmp_path,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-
-    stale = run_compiler("--check")
-    assert stale.returncode == 1
-    assert "stale" in stale.stderr
-    regenerated = run_compiler()
-    assert regenerated.returncode == 0, regenerated.stderr
-    definitions = runpy.run_path(str(tmp_path / "src/pipelines/contract_rules.py"))
-    assert definitions["SOURCE_COLUMNS"]["ads_campaigns"][-1] == "placement_type"
-    assert definitions["SOURCE_SCHEMAS"]["ads_campaigns"].endswith("placement_type STRING")
-    assert definitions["SOURCE_SYSTEM"]["ads_campaigns"] == "paid_media"
-    assert "placement_type_not_null" not in definitions["SOURCE_EXPECTATIONS"]["ads_campaigns"]
-    assert run_compiler("--check").returncode == 0
+    after = load_contract_catalog(tmp_path / "contracts")
+    assert "placement_type" not in before.sources["ads_campaigns"].columns
+    assert after.sources["ads_campaigns"].columns[-1] == "placement_type"
+    assert after.sources["ads_campaigns"].spark_schema.endswith("placement_type STRING")
+    assert after.sources["ads_campaigns"].source_system == "paid_media"
+    assert "placement_type_not_null" not in after.expectations["source"]["ads_campaigns"]
+    # Required fields and enumerations also respond to YAML changes during initialization.
+    contract["schema"][0]["properties"][-1]["required"] = True
+    contract["schema"][0]["properties"][-1]["enum"] = [{"value": "Feed"}, {"value": "Stories"}]
+    contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
+    rules = load_contract_catalog(tmp_path / "contracts").expectations["source"]["ads_campaigns"]
+    assert rules["placement_type_not_null"] == "placement_type IS NOT NULL"
+    assert rules["placement_type_accepted_values"] == "placement_type IN ('Feed', 'Stories')"
 
 
-def test_generated_lakeflow_rules_are_current(repository_root):
+def test_contract_validation_command(repository_root):
     completed = subprocess.run(
-        [sys.executable, "scripts/compile_contracts.py", "--check"],
+        [sys.executable, "scripts/validate_contracts.py"],
         cwd=repository_root,
         text=True,
         capture_output=True,
         check=False,
     )
     assert completed.returncode == 0, completed.stderr
+
+
+def test_runtime_catalog_uses_odcs_library_and_matches_all_contracts(repository_root, monkeypatch):
+    paths = []
+    original = OpenDataContractStandard.from_file
+
+    def load(path):
+        paths.append(Path(path))
+        return original(path)
+
+    monkeypatch.setattr(OpenDataContractStandard, "from_file", load)
+    catalog = load_contract_catalog(repository_root / "contracts")
+    assert set(paths) == set(contract_paths(repository_root))
+    for path in paths:
+        contract = load_yaml(path)
+        layer = path.parent.name
+        for element in contract["schema"]:
+            assert (
+                catalog.expectations[layer][element["name"]] == compile_object(contract, element["name"]).expectations
+            )
+            if layer == "source":
+                assert catalog.sources[element["name"]].columns == tuple(prop["name"] for prop in element["properties"])
+
+
+def test_missing_deployed_contracts_fail_with_a_useful_error(tmp_path):
+    with pytest.raises(ValueError, match="No ODCS contracts found"):
+        load_contract_catalog(tmp_path)
 
 
 def test_compatibility_allows_nullable_additions(repository_root):

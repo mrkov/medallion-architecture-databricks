@@ -15,7 +15,7 @@ if pipeline_root not in sys.path:
 
 from functools import reduce
 
-from contract_rules import SILVER_PRODUCT_EXPECTATIONS
+from contract_loader import SILVER_PRODUCT_EXPECTATIONS
 from pipeline_common import table_name
 from pyspark import pipelines as dp
 from pyspark.sql import DataFrame

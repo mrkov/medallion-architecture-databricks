@@ -1,6 +1,6 @@
 """Materialized facts and reports in domain-specific Platinum data mart schemas."""
 
-from contract_rules import PLATINUM_EXPECTATIONS
+from contract_loader import PLATINUM_EXPECTATIONS
 from pipeline_common import spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F

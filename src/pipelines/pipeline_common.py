@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contract_rules import SOURCE_COLUMNS, SOURCE_SCHEMAS, SOURCE_SYSTEM
+from contract_loader import source_definition
 from pyspark.sql import DataFrame, SparkSession, Window
 from pyspark.sql import functions as F
 
@@ -21,8 +21,9 @@ def table_name(layer: str, name: str) -> str:
 
 
 def read_landing(object_name: str) -> DataFrame:
-    columns = SOURCE_COLUMNS[object_name]
-    source_system = SOURCE_SYSTEM[object_name]
+    source = source_definition(object_name)
+    columns = source.columns
+    source_system = source.source_system
     return (
         spark.readStream.format("cloudFiles")
         .option("cloudFiles.format", "csv")
@@ -30,7 +31,7 @@ def read_landing(object_name: str) -> DataFrame:
         .option("rescuedDataColumn", "_rescued_data")
         .option("header", "true")
         .option("mode", "PERMISSIVE")
-        .schema(SOURCE_SCHEMAS[object_name])
+        .schema(source.spark_schema)
         .load(f"{LANDING_ROOT}/{source_system}/{object_name}")
         .select(
             *(F.col(column).cast("string").alias(column) for column in columns),

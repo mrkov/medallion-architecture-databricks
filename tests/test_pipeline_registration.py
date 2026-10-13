@@ -2,11 +2,13 @@
 
 import glob
 import runpy
+import shutil
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
+import yaml
 
 from medallion_poc.contracts import load_yaml
 
@@ -56,7 +58,7 @@ def registered_datasets(monkeypatch):
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
     # Clear shared-module caches for each pipeline and restore the original entries after the test.
-    for name in ("pipeline_common", "silver_common", "contract_rules"):
+    for name in ("pipeline_common", "silver_common", "contract_loader"):
         monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.delitem(sys.modules, name)
     return registered
@@ -124,7 +126,7 @@ def test_configured_pipeline_registers_only_its_contracted_tables(
         assert all(value["expectations"]["policy"] == "fail" for value in registered_datasets.values())
 
 
-def test_read_landing_consumes_contract_definitions(repository_root, monkeypatch, registered_datasets):
+def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path, monkeypatch, registered_datasets):
     class Expression:
         def __init__(self, name):
             self.name = name
@@ -158,12 +160,17 @@ def test_read_landing_consumes_contract_definitions(repository_root, monkeypatch
         def withColumn(self, _name, _expression):
             return self
 
-    # A contract can add a raw field and change its source route without changing pipeline_common.py.
-    definitions = ModuleType("contract_rules")
-    definitions.SOURCE_COLUMNS = {"source_customers": ("business_id", "new_contract_field")}
-    definitions.SOURCE_SYSTEM = {"source_customers": "declared_source"}
-    definitions.SOURCE_SCHEMAS = {"source_customers": "business_id STRING, new_contract_field STRING"}
-    monkeypatch.setitem(sys.modules, "contract_rules", definitions)
+    # Change only a deployed YAML contract; use the actual loader and ingestion helper.
+    shutil.copytree(repository_root / "src", tmp_path / "src", ignore=shutil.ignore_patterns("__pycache__"))
+    shutil.copytree(repository_root / "contracts", tmp_path / "contracts")
+    contract_path = tmp_path / "contracts/source/crm.odcs.yaml"
+    contract = load_yaml(contract_path)
+    contract["schema"][0]["properties"].append(
+        {"name": "new_contract_field", "logicalType": "string", "required": False}
+    )
+    contract["customProperties"][0]["value"] = "declared_source"
+    contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
+    monkeypatch.syspath_prepend(str(tmp_path / "src/pipelines"))
     reader = Reader()
     spark = sys.modules["pyspark.sql"].SparkSession.getActiveSession()
     spark.readStream = reader
@@ -172,9 +179,13 @@ def test_read_landing_consumes_contract_definitions(repository_root, monkeypatch
     functions.lit = Expression
     functions.current_timestamp = lambda: Expression("timestamp")
     functions.regexp_extract = lambda *args: Expression("batch_id")
-    module = runpy.run_path(str(repository_root / "src/pipelines/pipeline_common.py"))
-    assert module["read_landing"]("source_customers") is reader
+    module = runpy.run_path(str(tmp_path / "src/pipelines/pipeline_common.py"))
+    assert module["read_landing"]("crm_contacts") is reader
     assert reader.format_name == "cloudFiles"
-    assert reader.ddl == definitions.SOURCE_SCHEMAS["source_customers"]
-    assert reader.path == "/Volumes/main/poc_landing/landing/declared_source/source_customers"
-    assert reader.selected == ["business_id", "new_contract_field", "_rescued_data", "_source_file"]
+    assert reader.ddl.endswith("new_contract_field STRING")
+    assert reader.path == "/Volumes/main/poc_landing/landing/declared_source/crm_contacts"
+    assert reader.selected == [
+        *[prop["name"] for prop in contract["schema"][0]["properties"]],
+        "_rescued_data",
+        "_source_file",
+    ]

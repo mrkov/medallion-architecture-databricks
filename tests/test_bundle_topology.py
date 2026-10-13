@@ -26,6 +26,13 @@ def test_pipeline_per_source_and_curated_layer(repository_root):
     assert all("poc.pipeline_scope" not in pipeline["configuration"] for pipeline in pipelines.values())
 
 
+def test_bundle_installs_odcs_library_and_uploads_yaml_for_runtime_loading(repository_root):
+    config = yaml.safe_load((repository_root / "databricks.yml").read_text())
+    assert "contracts/**/*.yaml" in config["sync"]["include"]
+    for pipeline in _resources(repository_root)["pipelines"].values():
+        assert "open-data-contract-standard==3.2.0" in pipeline["environment"]["dependencies"]
+
+
 def test_each_source_job_refreshes_curated_layers(repository_root):
     jobs = _resources(repository_root)["jobs"]
     for source in ("erp", "crm", "ads"):

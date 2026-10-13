@@ -9,6 +9,7 @@ description = "Four-layer Lakeflow Declarative Pipelines POC with executable ODC
 requires-python = ">=3.11"
 dependencies = [
   "jsonschema>=4.23,<5",
+  "open-data-contract-standard==3.2.0",
   "PyYAML>=6.0.2,<7",
 ]
 

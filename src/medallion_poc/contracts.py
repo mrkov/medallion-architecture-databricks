@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import jsonschema
 import yaml
+from open_data_contract_standard.model import OpenDataContractStandard
 
 
 @dataclass(frozen=True)
@@ -27,21 +27,21 @@ class CompiledObject:
 
 
 @dataclass(frozen=True)
-class CompiledSourceObject:
+class SourceInterface:
     object_name: str
     source_system: str
     columns: tuple[str, ...]
     spark_schema: str
 
 
-def compile_source_objects(contract: dict[str, Any]) -> tuple[CompiledSourceObject, ...]:
-    """Compile flat CSV ingestion interfaces, preserving the contract's column order."""
+def source_interfaces(contract: dict[str, Any]) -> tuple[SourceInterface, ...]:
+    """Read flat CSV ingestion interfaces, preserving the contract's column order."""
     systems = [
         item.get("value") for item in contract.get("customProperties", []) if item.get("property") == "source_system"
     ]
     if len(systems) != 1 or not isinstance(systems[0], str) or not _identifier(systems[0]):
         raise ValueError(f"Source contract {contract.get('id')} needs one valid source_system custom property")
-    compiled = []
+    interfaces = []
     objects = set()
     for element in contract.get("schema", []):
         name = element["name"]
@@ -68,15 +68,48 @@ def compile_source_objects(contract: dict[str, Any]) -> tuple[CompiledSourceObje
             raise ValueError(f"Source object {name} uses columns reserved for ingestion metadata")
         if any(prop.get("logicalType") != "string" for prop in properties):
             raise ValueError(f"Source object {name} must declare every Bronze payload field as logicalType: string")
-        compiled.append(
-            CompiledSourceObject(
+        interfaces.append(
+            SourceInterface(
                 object_name=name,
                 source_system=systems[0],
                 columns=columns,
                 spark_schema=", ".join(f"{column} STRING" for column in columns),
             )
         )
-    return tuple(compiled)
+    return tuple(interfaces)
+
+
+@dataclass(frozen=True)
+class ContractCatalog:
+    sources: dict[str, SourceInterface]
+    expectations: dict[str, dict[str, dict[str, str]]]
+
+
+def load_contract_catalog(root: Path) -> ContractCatalog:
+    """Load deployed ODCS YAML with the ODCS library and derive runtime interfaces/rules."""
+    sources: dict[str, SourceInterface] = {}
+    expectations: dict[str, dict[str, dict[str, str]]] = {}
+    for layer in ("source", "silver", "gold", "platinum"):
+        paths = sorted((root / layer).glob("*.odcs.yaml"))
+        if not paths:
+            raise ValueError(f"No ODCS contracts found in {root / layer}")
+        expectations[layer] = {}
+        for path in paths:
+            model = OpenDataContractStandard.from_file(str(path))
+            if model.apiVersion != "v3.2.0" or model.kind != "DataContract" or not model.id or not model.schema_:
+                raise ValueError(f"{path} must be an ODCS v3.2.0 DataContract with an id and schema")
+            contract = model.model_dump(by_alias=True, exclude_unset=True)
+            if layer == "source":
+                for source in source_interfaces(contract):
+                    if source.object_name in sources:
+                        raise ValueError(f"Source object {source.object_name!r} is declared by multiple contracts")
+                    sources[source.object_name] = source
+            for element in contract["schema"]:
+                name = element["name"]
+                if name in expectations[layer]:
+                    raise ValueError(f"Duplicate object {name!r} in {layer} contracts: {path}")
+                expectations[layer][name] = compile_object(contract, name).expectations
+    return ContractCatalog(sources=sources, expectations=expectations)
 
 
 def _identifier(value: str) -> bool:
@@ -92,6 +125,9 @@ def load_yaml(path: Path) -> dict[str, Any]:
 
 
 def validate_contract(path: Path, schema_path: Path) -> dict[str, Any]:
+    # Full specification validation runs locally/CI; the pipeline only needs the ODCS model library.
+    import jsonschema
+
     contract = load_yaml(path)
     with schema_path.open(encoding="utf-8") as handle:
         schema = json.load(handle)
