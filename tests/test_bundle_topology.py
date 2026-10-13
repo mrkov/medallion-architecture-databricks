@@ -37,9 +37,15 @@ def test_bundle_installs_odcs_library_and_uploads_yaml_for_runtime_loading(repos
 def test_each_source_job_refreshes_curated_layers(repository_root):
     jobs = _resources(repository_root)["jobs"]
     for source in ("erp", "crm", "ads"):
-        tasks = jobs[f"ingest_{source}"]["tasks"]
-        assert tasks[0]["pipeline_task"]["pipeline_id"] == (f"${{resources.pipelines.{source}_source_pipeline.id}}")
-        assert tasks[1]["run_job_task"]["job_id"] == "${resources.jobs.curated_refresh.id}"
+        tasks = {task["task_key"]: task for task in jobs[f"ingest_{source}"]["tasks"]}
+        assert tasks["prepare_storage"]["notebook_task"]["notebook_path"] == "../src/notebooks/setup_poc.py"
+        assert tasks["prepare_storage"]["notebook_task"]["base_parameters"]["bundle_root"] == "${workspace.file_path}"
+        assert tasks[f"ingest_{source}"]["depends_on"] == [{"task_key": "prepare_storage"}]
+        assert tasks[f"ingest_{source}"]["pipeline_task"]["pipeline_id"] == (
+            f"${{resources.pipelines.{source}_source_pipeline.id}}"
+        )
+        assert tasks["refresh_curated_layers"]["depends_on"] == [{"task_key": f"ingest_{source}"}]
+        assert tasks["refresh_curated_layers"]["run_job_task"]["job_id"] == "${resources.jobs.curated_refresh.id}"
 
     curated_tasks = {task["task_key"]: task for task in jobs["curated_refresh"]["tasks"]}
     assert curated_tasks["refresh_gold"]["pipeline_task"]["pipeline_id"] == ("${resources.pipelines.gold_pipeline.id}")
@@ -48,6 +54,23 @@ def test_each_source_job_refreshes_curated_layers(repository_root):
     assert curated_tasks["refresh_platinum"]["pipeline_task"]["pipeline_id"] == (
         "${resources.pipelines.platinum_pipeline.id}"
     )
+
+
+def test_initialization_prepares_storage_and_keeps_source_loads_incremental(repository_root):
+    jobs = _resources(repository_root)["jobs"]
+    assert jobs["setup_poc"]["tasks"][0]["run_job_task"]["job_id"] == (
+        "${resources.jobs.initialize_source_interfaces.id}"
+    )
+    tasks = {
+        task["task_key"]: task for task in _resources(repository_root)["jobs"]["initialize_source_interfaces"]["tasks"]
+    }
+    assert tasks["prepare_storage"]["notebook_task"]["notebook_path"] == "../src/notebooks/setup_poc.py"
+    assert tasks["prepare_storage"]["notebook_task"]["base_parameters"]["bundle_root"] == "${workspace.file_path}"
+    for source in ("erp", "crm", "ads"):
+        task = tasks[f"initialize_{source}"]
+        assert task["depends_on"] == [{"task_key": "prepare_storage"}]
+        assert task["pipeline_task"]["pipeline_id"] == f"${{resources.pipelines.{source}_source_pipeline.id}}"
+        assert not task["pipeline_task"].get("full_refresh", False)
 
 
 def test_demo_refreshes_gold_and_platinum_after_each_arrival(repository_root):

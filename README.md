@@ -230,6 +230,29 @@ immediately if any expected transition is missing.
 The initial source tasks use a full refresh so the demo is repeatable. Run this workflow only against a
 dedicated POC schema prefix: resetting the landing volume is part of the demonstration.
 
+### Setup notebook
+
+[`setup_poc.py`](src/notebooks/setup_poc.py) is a dedicated Databricks notebook. Open it under the deployed
+bundle's `src/notebooks` folder, set its `catalog`, `schema_prefix`, and `volume_name` widgets to the values
+used at deploy, and select **Run all**. It discovers the bundle root from the notebook context, or accepts an
+explicit `bundle_root` widget when opened elsewhere.
+
+The notebook creates missing layer/mart schemas, the managed landing volume, and the source directories
+declared by the ODCS YAML. It uses `IF NOT EXISTS`, preserves existing files and tables, and can be rerun.
+The `_platinum` schema is also created because it remains the Platinum pipeline's default namespace.
+
+For a fresh deployment, use the setup job to run the notebook and initialize all three Bronze/Silver source
+interfaces together, including empty sources:
+
+```bash
+databricks bundle run setup_poc --profile medallion-poc -t dev \
+  --var="catalog=main,schema_prefix=medallion_poc"
+```
+
+Initialization uses incremental pipeline updates. It creates table interfaces and processes any files already
+present without resetting checkpoints. The notebook itself creates storage only. Sample data comes from the
+staged demo. Gold needs all contracted Silver interfaces to exist, even if a source has not delivered rows yet.
+
 After the demo has initialized every contracted source interface, place new files in the appropriate landing
 directory and run only that source job:
 
@@ -239,8 +262,9 @@ databricks bundle run ingest_crm -t dev --var="catalog=main,schema_prefix=medall
 databricks bundle run ingest_ads -t dev --var="catalog=main,schema_prefix=medallion_poc"
 ```
 
-Each command finishes its own Bronze/Silver load and then runs Gold followed by Platinum. To use the
-individual jobs without running the staged demo first, run `initialize_source_interfaces` once after deploy.
+Each command first runs the setup notebook to prepare missing storage, finishes its own Bronze/Silver load,
+then runs Gold followed by Platinum. To use individual jobs without running the staged demo first, run
+`setup_poc` (or `initialize_source_interfaces`) once after deploy so all Silver input tables exist.
 You can also run `curated_refresh` directly when Silver data was changed by another process.
 
 Earlier versions of this POC used one pipeline with the target schema `medallion_poc_pipeline`. That schema

@@ -102,6 +102,13 @@ resources:
         poc.volume_name: ${var.volume_name}
 
   jobs:
+    setup_poc:
+      name: "[${bundle.target}] Set up POC storage and source interfaces"
+      tasks:
+        - task_key: initialize
+          run_job_task:
+            job_id: ${resources.jobs.initialize_source_interfaces.id}
+
     curated_refresh:
       name: "[${bundle.target}] Refresh Gold and Platinum"
       max_concurrent_runs: 1
@@ -130,7 +137,17 @@ resources:
     ingest_erp:
       name: "[${bundle.target}] Ingest ERP then refresh curated layers"
       tasks:
+        - task_key: prepare_storage
+          notebook_task:
+            notebook_path: ../src/notebooks/setup_poc.py
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
         - task_key: ingest_erp
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
         - task_key: refresh_curated_layers
@@ -142,7 +159,17 @@ resources:
     ingest_crm:
       name: "[${bundle.target}] Ingest CRM then refresh curated layers"
       tasks:
+        - task_key: prepare_storage
+          notebook_task:
+            notebook_path: ../src/notebooks/setup_poc.py
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
         - task_key: ingest_crm
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
         - task_key: refresh_curated_layers
@@ -154,7 +181,17 @@ resources:
     ingest_ads:
       name: "[${bundle.target}] Ingest Ads then refresh curated layers"
       tasks:
+        - task_key: prepare_storage
+          notebook_task:
+            notebook_path: ../src/notebooks/setup_poc.py
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
         - task_key: ingest_ads
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
         - task_key: refresh_curated_layers
@@ -166,18 +203,29 @@ resources:
     initialize_source_interfaces:
       name: "[${bundle.target}] Initialize source interfaces"
       tasks:
+        - task_key: prepare_storage
+          notebook_task:
+            notebook_path: ../src/notebooks/setup_poc.py
+            base_parameters:
+              bundle_root: ${workspace.file_path}
+              catalog: ${var.catalog}
+              schema_prefix: ${var.schema_prefix}
+              volume_name: ${var.volume_name}
         - task_key: initialize_erp
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
-            full_refresh: true
         - task_key: initialize_crm
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-            full_refresh: true
         - task_key: initialize_ads
+          depends_on:
+            - task_key: prepare_storage
           pipeline_task:
             pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-            full_refresh: true
 
     medallion_poc_demo:
       name: "[${bundle.target}] Four-layer POC staged-arrival demo"
