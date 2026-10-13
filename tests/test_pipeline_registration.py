@@ -14,7 +14,7 @@ from medallion_poc.contracts import load_yaml
 
 
 @pytest.fixture
-def registered_datasets(monkeypatch):
+def registered_datasets(monkeypatch, repository_root):
     registered = {}
 
     def dataset_decorator(kind, **settings):
@@ -39,8 +39,13 @@ def registered_datasets(monkeypatch):
     dp.expect_all = lambda rules: expectation_decorator("observe", rules)
     dp.expect_all_or_fail = lambda rules: expectation_decorator("fail", rules)
 
-    configuration = {"poc.catalog": "main", "poc.schema_prefix": "poc", "poc.volume_name": "landing"}
-    spark = SimpleNamespace(conf=SimpleNamespace(get=configuration.__getitem__))
+    configuration = {
+        "poc.catalog": "main",
+        "poc.schema_prefix": "poc",
+        "poc.volume_name": "landing",
+        "poc.bundle_root": str(repository_root),
+    }
+    spark = SimpleNamespace(conf=SimpleNamespace(get=configuration.get, set=configuration.__setitem__))
     sql = ModuleType("pyspark.sql")
     sql.SparkSession = SimpleNamespace(getActiveSession=lambda: spark)
     sql.DataFrame = type("DataFrame", (), {})
@@ -77,25 +82,25 @@ def _configured_files(repository_root, pipeline):
 
 
 @pytest.mark.parametrize("owner", ["erp", "crm", "ads", "gold", "platinum"])
-def test_configured_pipeline_registers_only_its_contracted_tables(
-    repository_root, monkeypatch, registered_datasets, owner
+def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
+    repository_root, tmp_path, monkeypatch, registered_datasets, owner
 ):
     pipelines = load_yaml(repository_root / "resources/medallion_poc.yml")["resources"]["pipelines"]
     key = f"{owner}_source_pipeline" if owner in {"erp", "crm", "ads"} else f"{owner}_pipeline"
     pipeline_root = (repository_root / "src/pipelines").resolve()
-    if owner in {"erp", "crm", "ads"}:
-        # Nested source files must locate shared modules even when only their own directory is on sys.path.
-        monkeypatch.setattr(
-            sys,
-            "path",
-            [str(pipeline_root / owner), *[entry for entry in sys.path if Path(entry).resolve() != pipeline_root]],
-        )
-    else:
-        monkeypatch.syspath_prepend(str(pipeline_root))
+    # Simulate Lakeflow: no __file__, no injected spark, an unrelated cwd, and no shared source paths.
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "path",
+        [entry for entry in sys.path if Path(entry).resolve() not in {pipeline_root, pipeline_root.parent}],
+    )
     files = _configured_files(repository_root, pipelines[key])
     assert files
     for path in files:
-        runpy.run_path(str(path))
+        namespace = {"__name__": "__pipeline__"}
+        exec(compile(path.read_text(), str(path), "exec"), namespace)
+        assert "__file__" not in namespace
 
     if owner in {"erp", "crm", "ads"}:
         contract = load_yaml(repository_root / f"contracts/source/{owner}.odcs.yaml")
@@ -124,6 +129,26 @@ def test_configured_pipeline_registers_only_its_contracted_tables(
             }
         assert set(registered_datasets) == expected
         assert all(value["expectations"]["policy"] == "fail" for value in registered_datasets.values())
+
+
+def test_contract_loader_without_file_uses_configured_root(repository_root, tmp_path, monkeypatch, registered_datasets):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    path = repository_root / "src/pipelines/contract_loader.py"
+    namespace = {"__name__": "__pipeline__"}
+    exec(compile(path.read_text(), str(path), "exec"), namespace)
+    assert "__file__" not in namespace
+    assert namespace["CONTRACT_ROOT"] == repository_root / "contracts"
+    assert namespace["source_definition"]("crm_contacts").source_system == "crm"
+
+
+@pytest.mark.parametrize("bundle_root", ["", "relative/path"])
+def test_missing_or_relative_bundle_root_requests_redeployment(repository_root, registered_datasets, bundle_root):
+    spark = sys.modules["pyspark.sql"].SparkSession.getActiveSession()
+    spark.conf.set("poc.bundle_root", bundle_root)
+    path = repository_root / "src/pipelines/crm/bronze.py"
+    with pytest.raises(RuntimeError, match="Redeploy the bundle"):
+        exec(compile(path.read_text(), str(path), "exec"), {"__name__": "__pipeline__"})
 
 
 def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path, monkeypatch, registered_datasets):
@@ -173,6 +198,7 @@ def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path,
     monkeypatch.syspath_prepend(str(tmp_path / "src/pipelines"))
     reader = Reader()
     spark = sys.modules["pyspark.sql"].SparkSession.getActiveSession()
+    spark.conf.set("poc.bundle_root", str(tmp_path))
     spark.readStream = reader
     functions = sys.modules["pyspark.sql.functions"]
     functions.col = Expression

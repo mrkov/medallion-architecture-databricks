@@ -165,7 +165,10 @@ the requested source object; Silver uses that same interface when capturing reje
 
 There are no generated Python column lists or expectation artifacts. Bundle sync uploads the YAML files,
 and each serverless pipeline's `environment.dependencies` installs `open-data-contract-standard==3.2.0`.
-Paths are resolved relative to the deployed modules, so the runtime does not depend on the working directory.
+The bundle sets `poc.bundle_root: ${workspace.file_path}` in every pipeline. Source files use that absolute
+workspace path to import shared modules and locate the uploaded `contracts/` directory. Lakeflow may evaluate
+Python source without `__file__`, so path initialization relies on the configured root rather than file globals
+or the working directory. Redeploy the bundle after updating code so this configuration is supplied.
 
 After editing a contract, validate locally, deploy the bundle, and start the relevant pipeline:
 
