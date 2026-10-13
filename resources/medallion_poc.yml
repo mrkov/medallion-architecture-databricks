@@ -10,12 +10,11 @@ resources:
       photon: true
       libraries:
         - glob:
-            include: ../src/pipelines/**
+            include: ../src/pipelines/erp/**
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-        poc.pipeline_scope: erp
 
     crm_source_pipeline:
       name: "[${bundle.target}] CRM Bronze to Silver"
@@ -27,12 +26,11 @@ resources:
       photon: true
       libraries:
         - glob:
-            include: ../src/pipelines/**
+            include: ../src/pipelines/crm/**
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-        poc.pipeline_scope: crm
 
     ads_source_pipeline:
       name: "[${bundle.target}] Ads Bronze to Silver"
@@ -44,12 +42,11 @@ resources:
       photon: true
       libraries:
         - glob:
-            include: ../src/pipelines/**
+            include: ../src/pipelines/ads/**
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-        poc.pipeline_scope: ads
 
     gold_pipeline:
       name: "[${bundle.target}] Silver to Gold"
@@ -60,13 +57,12 @@ resources:
       continuous: false
       photon: true
       libraries:
-        - glob:
-            include: ../src/pipelines/**
+        - file:
+            path: ../src/pipelines/gold.py
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-        poc.pipeline_scope: gold
 
     platinum_pipeline:
       name: "[${bundle.target}] Gold to Platinum Sales and Marketing marts"
@@ -78,13 +74,12 @@ resources:
       continuous: false
       photon: true
       libraries:
-        - glob:
-            include: ../src/pipelines/**
+        - file:
+            path: ../src/pipelines/platinum.py
       configuration:
         poc.catalog: ${var.catalog}
         poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-        poc.pipeline_scope: platinum
 
   jobs:
     curated_refresh:

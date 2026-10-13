@@ -5,13 +5,13 @@ from __future__ import annotations
 from functools import reduce
 
 from contract_rules import GOLD_EXPECTATIONS
-from pipeline_common import deterministic_key, latest_record, scoped, spark, table_name
+from pipeline_common import deterministic_key, latest_record, spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 
-@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_customer"), table_properties={"layer": "gold"}))
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_customer"]))
+@dp.materialized_view(name=table_name("gold", "dim_customer"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_customer"])
 def gold_dim_customer():
     customers = spark.read.table(table_name("silver", "erp_customers")).alias("erp")
     contacts = latest_record(spark.read.table(table_name("silver", "crm_contacts")), ["erp_customer_id"]).alias("crm")
@@ -32,8 +32,8 @@ def gold_dim_customer():
     )
 
 
-@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_product"), table_properties={"layer": "gold"}))
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_product"]))
+@dp.materialized_view(name=table_name("gold", "dim_product"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_product"])
 def gold_dim_product():
     products = spark.read.table(table_name("silver", "erp_products"))
     return products.select(
@@ -48,8 +48,8 @@ def gold_dim_product():
     )
 
 
-@scoped("gold", dp.materialized_view(name=table_name("gold", "dim_campaign"), table_properties={"layer": "gold"}))
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_campaign"]))
+@dp.materialized_view(name=table_name("gold", "dim_campaign"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["dim_campaign"])
 def gold_dim_campaign():
     campaigns = spark.read.table(table_name("silver", "ads_campaigns"))
     return campaigns.select(
@@ -60,8 +60,8 @@ def gold_dim_campaign():
     )
 
 
-@scoped("gold", dp.materialized_view(name=table_name("gold", "fact_sales"), table_properties={"layer": "gold"}))
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_sales"]))
+@dp.materialized_view(name=table_name("gold", "fact_sales"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_sales"])
 def gold_fact_sales():
     lines = spark.read.table(table_name("silver", "erp_order_lines")).alias("line")
     orders = spark.read.table(table_name("silver", "erp_orders")).alias("ord")
@@ -81,10 +81,8 @@ def gold_fact_sales():
     )
 
 
-@scoped(
-    "gold", dp.materialized_view(name=table_name("gold", "fact_attributed_sales"), table_properties={"layer": "gold"})
-)
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_attributed_sales"]))
+@dp.materialized_view(name=table_name("gold", "fact_attributed_sales"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_attributed_sales"])
 def gold_fact_attributed_sales():
     lines = spark.read.table(table_name("silver", "erp_order_lines")).alias("line")
     orders = spark.read.table(table_name("silver", "erp_orders")).alias("ord")
@@ -142,10 +140,8 @@ def gold_fact_attributed_sales():
     )
 
 
-@scoped(
-    "gold", dp.materialized_view(name=table_name("gold", "fact_ad_spend_daily"), table_properties={"layer": "gold"})
-)
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_ad_spend_daily"]))
+@dp.materialized_view(name=table_name("gold", "fact_ad_spend_daily"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["fact_ad_spend_daily"])
 def gold_fact_ad_spend_daily():
     spend = spark.read.table(table_name("silver", "ads_spend"))
     return spend.select(
@@ -171,8 +167,8 @@ def _readiness(source_object: str, source_timestamp: str):
     )
 
 
-@scoped("gold", dp.materialized_view(name=table_name("gold", "data_readiness"), table_properties={"layer": "gold"}))
-@scoped("gold", dp.expect_all_or_fail(GOLD_EXPECTATIONS["data_readiness"]))
+@dp.materialized_view(name=table_name("gold", "data_readiness"), table_properties={"layer": "gold"})
+@dp.expect_all_or_fail(GOLD_EXPECTATIONS["data_readiness"])
 def gold_data_readiness():
     frames = [
         _readiness("erp_customers", "updated_at"),

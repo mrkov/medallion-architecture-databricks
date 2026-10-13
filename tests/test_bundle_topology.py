@@ -17,13 +17,13 @@ def test_pipeline_per_source_and_curated_layer(repository_root):
         "gold_pipeline",
         "platinum_pipeline",
     }
-    assert {key: value["configuration"]["poc.pipeline_scope"] for key, value in pipelines.items()} == {
-        "erp_source_pipeline": "erp",
-        "crm_source_pipeline": "crm",
-        "ads_source_pipeline": "ads",
-        "gold_pipeline": "gold",
-        "platinum_pipeline": "platinum",
-    }
+    for system in ("erp", "crm", "ads"):
+        pipeline = pipelines[f"{system}_source_pipeline"]
+        assert pipeline["libraries"] == [{"glob": {"include": f"../src/pipelines/{system}/**"}}]
+    for layer in ("gold", "platinum"):
+        pipeline = pipelines[f"{layer}_pipeline"]
+        assert pipeline["libraries"] == [{"file": {"path": f"../src/pipelines/{layer}.py"}}]
+    assert all("poc.pipeline_scope" not in pipeline["configuration"] for pipeline in pipelines.values())
 
 
 def test_each_source_job_refreshes_curated_layers(repository_root):

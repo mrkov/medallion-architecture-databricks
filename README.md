@@ -21,6 +21,35 @@ pipeline. Gold and Platinum each have their own pipeline. The three source inges
 queued `curated_refresh` job after their source pipeline succeeds, so source schedules can differ without
 duplicating curated logic.
 
+Bronze and Silver code is separated by source:
+
+```text
+src/pipelines/
+├── erp/
+│   ├── bronze.py
+│   └── silver.py
+├── crm/
+│   ├── bronze.py
+│   └── silver.py
+├── ads/
+│   ├── bronze.py
+│   └── silver.py
+├── gold.py
+├── platinum.py
+├── pipeline_common.py
+├── silver_common.py
+└── contract_rules.py
+```
+
+Each source pipeline includes only its own folder. Gold and Platinum each include their own definition file.
+Shared ingestion, validation, deduplication, and quarantine helpers are imported from the pipeline root;
+they do not register datasets. Explicit library selection replaces the former `poc.pipeline_scope` filters.
+Adding another source means adding its Bronze/Silver files and its pipeline resource.
+
+This source-file refactor keeps the existing pipeline resource keys and fully qualified table names. Deploy
+the updated bundle using the same catalog, schema prefix, and target to retain table ownership and checkpoints.
+It does not require a full refresh or deletion of pipelines.
+
 | Layer | Responsibility | Enforcement |
 |---|---|---|
 | Bronze | Append-only source copies; every payload field is a string | ODCS expectations observe violations without discarding raw data |

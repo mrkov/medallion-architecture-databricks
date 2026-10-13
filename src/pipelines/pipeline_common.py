@@ -12,14 +12,7 @@ if spark is None:
 CATALOG = spark.conf.get("poc.catalog")
 SCHEMA_PREFIX = spark.conf.get("poc.schema_prefix")
 VOLUME_NAME = spark.conf.get("poc.volume_name")
-PIPELINE_SCOPE = spark.conf.get("poc.pipeline_scope")
 LANDING_ROOT = f"/Volumes/{CATALOG}/{SCHEMA_PREFIX}_landing/{VOLUME_NAME}"
-
-VALID_PIPELINE_SCOPES = {"erp", "crm", "ads", "gold", "platinum"}
-if PIPELINE_SCOPE not in VALID_PIPELINE_SCOPES:
-    raise ValueError(
-        f"Unsupported poc.pipeline_scope {PIPELINE_SCOPE!r}; expected one of {sorted(VALID_PIPELINE_SCOPES)}"
-    )
 
 SOURCE_COLUMNS: dict[str, tuple[str, ...]] = {
     "erp_customers": (
@@ -85,13 +78,6 @@ SOURCE_SYSTEM: dict[str, str] = {
 
 def table_name(layer: str, name: str) -> str:
     return f"{CATALOG}.{SCHEMA_PREFIX}_{layer}.{name}"
-
-
-def scoped(scope: str, decorator):
-    """Register a dataset only in the pipeline that owns the requested scope."""
-    if PIPELINE_SCOPE == scope:
-        return decorator
-    return lambda function: function
 
 
 def read_landing(object_name: str) -> DataFrame:

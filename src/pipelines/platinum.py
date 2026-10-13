@@ -1,20 +1,17 @@
 """Materialized facts and reports in domain-specific Platinum data mart schemas."""
 
 from contract_rules import PLATINUM_EXPECTATIONS
-from pipeline_common import scoped, spark, table_name
+from pipeline_common import spark, table_name
 from pyspark import pipelines as dp
 from pyspark.sql import functions as F
 
 
-@scoped(
-    "platinum",
-    dp.materialized_view(
-        name=table_name("platinum_sales", "fact_sales"),
-        comment="Sales mart fact with customer and product keys; one row per order line.",
-        table_properties={"layer": "platinum", "data_mart": "sales", "contract_version": "2.0.0"},
-    ),
+@dp.materialized_view(
+    name=table_name("platinum_sales", "fact_sales"),
+    comment="Sales mart fact with customer and product keys; one row per order line.",
+    table_properties={"layer": "platinum", "data_mart": "sales", "contract_version": "2.0.0"},
 )
-@scoped("platinum", dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["fact_sales"]))
+@dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["fact_sales"])
 def platinum_sales_fact():
     return spark.read.table(table_name("gold", "fact_sales")).select(
         "order_line_id",
@@ -32,15 +29,12 @@ def platinum_sales_fact():
     )
 
 
-@scoped(
-    "platinum",
-    dp.materialized_view(
-        name=table_name("platinum_sales", "sales_detail"),
-        comment="Flattened sales report in the Sales mart; one row per order line.",
-        table_properties={"layer": "platinum", "data_mart": "sales", "contract_version": "2.0.0"},
-    ),
+@dp.materialized_view(
+    name=table_name("platinum_sales", "sales_detail"),
+    comment="Flattened sales report in the Sales mart; one row per order line.",
+    table_properties={"layer": "platinum", "data_mart": "sales", "contract_version": "2.0.0"},
 )
-@scoped("platinum", dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["sales_detail"]))
+@dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["sales_detail"])
 def platinum_sales_detail():
     sales = spark.read.table(table_name("gold", "fact_sales")).alias("sales")
     customers = spark.read.table(table_name("gold", "dim_customer")).alias("customer")
@@ -64,15 +58,12 @@ def platinum_sales_detail():
     )
 
 
-@scoped(
-    "platinum",
-    dp.materialized_view(
-        name=table_name("platinum_marketing", "fact_campaign_performance"),
-        comment="Materialized campaign performance fact at activity date and campaign grain.",
-        table_properties={"layer": "platinum", "data_mart": "marketing", "contract_version": "2.0.0"},
-    ),
+@dp.materialized_view(
+    name=table_name("platinum_marketing", "fact_campaign_performance"),
+    comment="Materialized campaign performance fact at activity date and campaign grain.",
+    table_properties={"layer": "platinum", "data_mart": "marketing", "contract_version": "2.0.0"},
 )
-@scoped("platinum", dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["fact_campaign_performance"]))
+@dp.expect_all_or_fail(PLATINUM_EXPECTATIONS["fact_campaign_performance"])
 def platinum_campaign_performance_fact():
     attributed = (
         spark.read.table(table_name("gold", "fact_attributed_sales"))
