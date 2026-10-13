@@ -28,7 +28,37 @@ duplicating curated logic.
 | Gold | Facts and dimensions with stable grain | Strict ODCS-derived expectations; every table reads Silver directly |
 | Platinum | Consumer-facing datamarts | Strict expectations; every object reads Gold directly |
 
-Unity Catalog schemas are named `<schema_prefix>_bronze`, `_silver`, `_gold`, and `_platinum`. Landing files use a managed volume in `<schema_prefix>_landing`.
+Unity Catalog schemas are named `<schema_prefix>_bronze`, `_silver`, and `_gold`. Platinum is organized as
+two data marts: `<schema_prefix>_platinum_sales` and `<schema_prefix>_platinum_marketing`. Landing files use
+a managed volume in `<schema_prefix>_landing`.
+
+## Platinum data marts
+
+A data mart is a collection of related objects for a business domain. Each Platinum mart has its own schema
+and ODCS contract defining the complete collection, including its physical tables/views and grains.
+
+| Mart schema (default prefix) | Materialized views containing facts/reports | Virtual dimension views |
+|---|---|---|
+| `medallion_poc_platinum_sales` | `fact_sales`, `sales_detail` | `dim_customer`, `dim_product` |
+| `medallion_poc_platinum_marketing` | `fact_campaign_performance` | `dim_campaign` |
+
+Sales consumers can join `fact_sales` to the dimension views by `customer_key` and `product_key` to form a star
+model. The existing flattened report is retained as `sales_detail` for consumers that prefer descriptive
+attributes in one object. Marketing consumers join their performance fact to `dim_campaign` by `campaign_code`.
+
+Facts and the reporting table are persisted as Lakeflow materialized views. Dimensions are ordinary Unity
+Catalog SQL views over Gold, so they always reflect the current Gold dimensions without duplicating storage.
+Every object reads Gold directly: `sales_detail` joins Gold facts and dimensions rather than other Platinum
+objects. One Platinum pipeline publishes both mart schemas; separate schemas do not require separate pipelines.
+
+For example, query the Sales mart without accessing Gold:
+
+```sql
+SELECT product.product_family, SUM(fact.line_amount) AS revenue
+FROM main.medallion_poc_platinum_sales.fact_sales AS fact
+JOIN main.medallion_poc_platinum_sales.dim_product AS product USING (product_key)
+GROUP BY product.product_family;
+```
 
 ## How Gold knows when to update
 
@@ -39,7 +69,7 @@ This POC makes that trigger explicit with Databricks Workflows:
 
 1. A source-specific job runs its Bronze-to-Silver pipeline.
 2. On success, it calls the shared `curated_refresh` job.
-3. `curated_refresh` runs Gold, then Platinum.
+3. `curated_refresh` runs Gold, creates the mart schemas and dimension views, then refreshes Platinum facts/reports.
 4. If source jobs finish close together, job queueing serializes the curated refresh requests.
 
 The source jobs are intentionally unscheduled. They can be started on demand for the POC. In production,
@@ -63,6 +93,12 @@ interfaces.
 ## Executable ODCS contracts
 
 Contracts live under [`contracts`](contracts) and use the official ODCS v3.2.0 schema. They define interface fields, logical types, required fields, enumerations, primary keys, grain, transformation lineage, ownership, and freshness objectives.
+
+The Platinum contracts [`sales_mart.odcs.yaml`](contracts/platinum/sales_mart.odcs.yaml) and
+[`marketing_mart.odcs.yaml`](contracts/platinum/marketing_mart.odcs.yaml) describe each complete data mart.
+Their versions are `2.0.0` because moving and renaming the consumer interfaces is a breaking change. Required
+fields on materialized outputs use compiled Platinum expectations; virtual dimensions inherit the enforced
+Gold constraints and the demo checks their grain and joins.
 
 The ODCS schema is fetched from the immutable `v3.2.0` Git tag and verified against a pinned SHA-256 checksum:
 
@@ -138,7 +174,26 @@ You can also run `curated_refresh` directly when Silver data was changed by anot
 Earlier versions of this POC used one pipeline with the target schema `medallion_poc_pipeline`. That schema
 was empty because every table name was fully qualified into its actual layer schema. The new bundle no longer
 uses that target. An already-created empty schema may remain after redeployment; the data tables are under
-`medallion_poc_bronze`, `_silver`, `_gold`, and `_platinum`.
+`medallion_poc_bronze`, `_silver`, `_gold`, `_platinum_sales`, and `_platinum_marketing`.
+
+### Upgrading from the single Platinum schema
+
+Deploy the updated bundle with your existing catalog and prefix, then run `curated_refresh` to create the
+two marts using your current Gold data:
+
+```bash
+databricks bundle deploy -t dev --profile medallion-poc \
+  --var="catalog=main,schema_prefix=medallion_poc"
+databricks bundle run curated_refresh -t dev --profile medallion-poc \
+  --var="catalog=main,schema_prefix=medallion_poc"
+```
+
+This update keeps the existing pipeline resource identities. It requires no deletion of source pipelines and
+no full refresh of Bronze or Silver. Update consumer queries from `_platinum.sales_datamart` to
+`_platinum_sales.sales_detail`, and from `_platinum.marketing_performance` to
+`_platinum_marketing.fact_campaign_performance`. The old `_platinum` schema is retained as the pipeline's
+default namespace for existing deployments; all new consumer objects have fully qualified mart names.
+Legacy objects in that schema may remain and are no longer updated by the new definitions.
 
 ### Upgrading from the earlier single-pipeline POC
 
@@ -167,8 +222,10 @@ with a new dedicated prefix such as `schema_prefix=medallion_poc_v2` instead.
 | `gold.fact_sales` | Order line | Stable sales fact |
 | `gold.fact_attributed_sales` | Order line | Late-arriving CRM and campaign enrichment status |
 | `gold.data_readiness` | Source object | Source timestamps, ingestion timestamps, and availability |
-| `platinum.sales_datamart` | Order line | Materialized semantic-model input |
-| `platinum.marketing_performance` | Date and campaign | Spend, attributed revenue, incomplete revenue, and ROAS |
-| `platinum.dim_*_vw` | Dimension business key | Virtual views over Gold dimensions |
+| `platinum_sales.fact_sales` | Order line | Materialized sales fact with keys for the Sales mart dimensions |
+| `platinum_sales.sales_detail` | Order line | Flattened sales report within the Sales mart |
+| `platinum_sales.dim_customer`, `dim_product` | Dimension business key | Virtual Sales mart views over Gold dimensions |
+| `platinum_marketing.fact_campaign_performance` | Date and campaign | Spend, attributed revenue, incomplete revenue, and ROAS |
+| `platinum_marketing.dim_campaign` | Campaign | Virtual Marketing mart view over the Gold campaign dimension |
 
 Pipeline expectation metrics are available in the Lakeflow event log. Unity Catalog lineage shows Bronze-to-Silver, Silver-to-Gold, and Gold-to-Platinum dependencies.

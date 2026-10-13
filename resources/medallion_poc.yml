@@ -69,8 +69,9 @@ resources:
         poc.pipeline_scope: gold
 
     platinum_pipeline:
-      name: "[${bundle.target}] Gold to Platinum"
+      name: "[${bundle.target}] Gold to Platinum Sales and Marketing marts"
       catalog: ${var.catalog}
+      # Preserve the existing pipeline namespace; outputs explicitly use Platinum mart schemas.
       target: ${var.schema_prefix}_platinum
       channel: ${var.pipeline_channel}
       serverless: true
@@ -97,12 +98,12 @@ resources:
             pipeline_id: ${resources.pipelines.gold_pipeline.id}
         - task_key: refresh_platinum
           depends_on:
-            - task_key: refresh_gold
+            - task_key: publish_dimension_views
           pipeline_task:
             pipeline_id: ${resources.pipelines.platinum_pipeline.id}
         - task_key: publish_dimension_views
           depends_on:
-            - task_key: refresh_platinum
+            - task_key: refresh_gold
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:
@@ -202,13 +203,13 @@ resources:
             full_refresh: true
         - task_key: platinum_after_erp
           depends_on:
-            - task_key: gold_after_erp
+            - task_key: publish_views
           pipeline_task:
             pipeline_id: ${resources.pipelines.platinum_pipeline.id}
             full_refresh: true
         - task_key: publish_views
           depends_on:
-            - task_key: platinum_after_erp
+            - task_key: gold_after_erp
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:
@@ -218,7 +219,7 @@ resources:
               volume_name: ${var.volume_name}
         - task_key: assert_erp_only
           depends_on:
-            - task_key: publish_views
+            - task_key: platinum_after_erp
           notebook_task:
             notebook_path: ../src/notebooks/demo_control.py
             base_parameters:

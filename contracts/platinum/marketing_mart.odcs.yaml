@@ -1,12 +1,12 @@
 apiVersion: v3.2.0
 kind: DataContract
 id: 039989dc-c9a6-4188-b164-e46f24554891
-name: platinum_marketing_performance
-version: 1.0.0
+name: platinum_marketing_mart
+version: 2.0.0
 status: active
 domain: marketing-analytics
 description:
-  purpose: Consumer-ready campaign spend and attributed revenue by day.
+  purpose: Marketing data mart containing a daily campaign performance fact and a virtual campaign dimension.
   usage: Campaign performance reporting and return-on-ad-spend analysis.
   limitations: Revenue without complete campaign attribution is exposed separately as incomplete revenue.
 team:
@@ -19,10 +19,11 @@ slaProperties:
     value: 5
     unit: minutes
 schema:
-  - name: marketing_performance
-    physicalType: table
+  - name: fact_campaign_performance
+    physicalName: <catalog>.<schema_prefix>_platinum_marketing.fact_campaign_performance
+    physicalType: materialized view
     logicalType: object
-    dataGranularityDescription: One row per order date and campaign code.
+    dataGranularityDescription: One row per activity date and campaign code, including revenue-only and spend-only dates.
     properties:
       - {name: activity_date, logicalType: date, required: true, primaryKey: true, primaryKeyPosition: 1}
       - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
@@ -32,4 +33,14 @@ schema:
       - {name: clicks, logicalType: integer, required: true, semanticType: measure}
       - {name: impressions, logicalType: integer, required: true, semanticType: measure}
       - {name: return_on_ad_spend, logicalType: number, required: false, semanticType: measure}
-
+  - name: dim_campaign
+    physicalName: <catalog>.<schema_prefix>_platinum_marketing.dim_campaign
+    physicalType: view
+    logicalType: object
+    description: Virtual SELECT * view over Gold dim_campaign; joins the performance fact by campaign_code.
+    dataGranularityDescription: One current row per campaign_code.
+    properties:
+      - {name: campaign_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: campaign_code, logicalType: string, required: true, unique: true}
+      - {name: campaign_name, logicalType: string, required: true}
+      - {name: platform, logicalType: string, required: true}

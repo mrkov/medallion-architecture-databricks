@@ -20,7 +20,8 @@ for identifier in (catalog, schema_prefix, volume_name):
 
 landing_schema = f"{schema_prefix}_landing"
 landing_root = f"/Volumes/{catalog}/{landing_schema}/{volume_name}"
-layer_schema = {layer: f"{schema_prefix}_{layer}" for layer in ("bronze", "silver", "gold", "platinum")}
+layer_schema = {layer: f"{schema_prefix}_{layer}" for layer in ("bronze", "silver", "gold")}
+mart_schema = {mart: f"{schema_prefix}_platinum_{mart}" for mart in ("sales", "marketing")}
 
 source_directories = (
     "erp/erp_customers",
@@ -35,7 +36,7 @@ source_directories = (
 
 def setup_storage(reset: bool) -> None:
     spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{landing_schema}`")
-    for schema in layer_schema.values():
+    for schema in (*layer_schema.values(), *mart_schema.values()):
         spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
     spark.sql(f"CREATE VOLUME IF NOT EXISTS `{catalog}`.`{landing_schema}`.`{volume_name}`")
     if reset:
@@ -124,24 +125,20 @@ spend_date,campaign_code,spend_amount,clicks,impressions,updated_at
 """,
     )
 elif action == "publish_views":
-    platinum = layer_schema["platinum"]
     gold = layer_schema["gold"]
-    spark.sql(
-        f"CREATE OR REPLACE VIEW `{catalog}`.`{platinum}`.`dim_customer_vw` AS "
-        f"SELECT * FROM `{catalog}`.`{gold}`.`dim_customer`"
-    )
-    spark.sql(
-        f"CREATE OR REPLACE VIEW `{catalog}`.`{platinum}`.`dim_product_vw` AS "
-        f"SELECT * FROM `{catalog}`.`{gold}`.`dim_product`"
-    )
-    spark.sql(
-        f"CREATE OR REPLACE VIEW `{catalog}`.`{platinum}`.`dim_campaign_vw` AS "
-        f"SELECT * FROM `{catalog}`.`{gold}`.`dim_campaign`"
-    )
+    for mart, dimensions in {"sales": ("dim_customer", "dim_product"), "marketing": ("dim_campaign",)}.items():
+        schema = mart_schema[mart]
+        spark.sql(f"CREATE SCHEMA IF NOT EXISTS `{catalog}`.`{schema}`")
+        for dimension in dimensions:
+            spark.sql(
+                f"CREATE OR REPLACE VIEW `{catalog}`.`{schema}`.`{dimension}` AS "
+                f"SELECT * FROM `{catalog}`.`{gold}`.`{dimension}`"
+            )
 elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
     gold = layer_schema["gold"]
     silver = layer_schema["silver"]
-    platinum = layer_schema["platinum"]
+    sales_mart = mart_schema["sales"]
+    marketing_mart = mart_schema["marketing"]
     expected_status = {
         "assert_erp_only": "ERP_ONLY",
         "assert_crm_enriched": "CRM_ENRICHED",
@@ -155,6 +152,33 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
     require_unique(f"`{catalog}`.`{gold}`.`fact_attributed_sales`", ["order_line_id"])
     require_unique(f"`{catalog}`.`{gold}`.`dim_customer`", ["customer_key"])
     require_unique(f"`{catalog}`.`{gold}`.`dim_product`", ["product_key"])
+    require_unique(f"`{catalog}`.`{sales_mart}`.`fact_sales`", ["order_line_id"])
+    require_unique(f"`{catalog}`.`{sales_mart}`.`sales_detail`", ["order_line_id"])
+    require_unique(f"`{catalog}`.`{sales_mart}`.`dim_customer`", ["customer_key"])
+    require_unique(f"`{catalog}`.`{sales_mart}`.`dim_product`", ["product_key"])
+    require_unique(f"`{catalog}`.`{marketing_mart}`.`fact_campaign_performance`", ["activity_date", "campaign_code"])
+    require_unique(f"`{catalog}`.`{marketing_mart}`.`dim_campaign`", ["campaign_key"])
+    for mart, dimensions in {"sales": ("dim_customer", "dim_product"), "marketing": ("dim_campaign",)}.items():
+        for dimension in dimensions:
+            require(
+                scalar(
+                    f"SELECT table_type FROM `{catalog}`.information_schema.tables "
+                    f"WHERE table_schema = '{mart_schema[mart]}' AND table_name = '{dimension}'"
+                )
+                == "VIEW",
+                f"{mart}.{dimension} must be a virtual view",
+            )
+    require(
+        scalar(
+            f"SELECT count(*) FROM `{catalog}`.`{sales_mart}`.`fact_sales` AS fact "
+            f"JOIN `{catalog}`.`{sales_mart}`.`dim_customer` AS customer USING (customer_key) "
+            f"JOIN `{catalog}`.`{sales_mart}`.`dim_product` AS product USING (product_key) "
+            "WHERE fact.order_line_id = 'OL100' AND customer.customer_number = 'CUST-100' "
+            "AND product.product_family = 'PHOTOBOOK' AND fact.line_amount = 59.80"
+        )
+        == 1,
+        "Sales mart fact and dimension views did not form the expected star model",
+    )
     require(
         scalar(
             f"SELECT count(*) FROM `{catalog}`.`{silver}`.`erp_contract_quarantine` "
@@ -165,7 +189,7 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
     )
     require(
         scalar(
-            f"SELECT count(*) FROM `{catalog}`.`{platinum}`.`sales_datamart` "
+            f"SELECT count(*) FROM `{catalog}`.`{sales_mart}`.`sales_detail` "
             "WHERE order_line_id = 'OL100' AND product_family = 'PHOTOBOOK' "
             "AND product_tier = 'PREMIUM'"
         )
@@ -175,7 +199,7 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
     if action == "assert_complete":
         performance = spark.sql(
             f"SELECT attributed_revenue, incomplete_revenue, spend_amount, return_on_ad_spend "
-            f"FROM `{catalog}`.`{platinum}`.`marketing_performance` "
+            f"FROM `{catalog}`.`{marketing_mart}`.`fact_campaign_performance` "
             "WHERE activity_date = DATE '2026-10-01' AND campaign_code = 'META_FALL_2026'"
         ).first()
         require(performance is not None, "Marketing performance row was not published")
@@ -183,6 +207,15 @@ elif action in {"assert_erp_only", "assert_crm_enriched", "assert_complete"}:
         require(float(performance.incomplete_revenue) == 0.0, "Revenue remained incomplete")
         require(float(performance.spend_amount) == 20.0, "Advertising spend did not arrive")
         require(float(performance.return_on_ad_spend) == 2.99, "ROAS was not calculated")
+        require(
+            scalar(
+                f"SELECT count(*) FROM `{catalog}`.`{marketing_mart}`.`fact_campaign_performance` AS fact "
+                f"JOIN `{catalog}`.`{marketing_mart}`.`dim_campaign` AS campaign USING (campaign_code) "
+                "WHERE fact.activity_date = DATE '2026-10-01' AND campaign.platform = 'Meta'"
+            )
+            == 1,
+            "Marketing mart campaign dimension did not join to its performance fact",
+        )
         require(
             scalar(
                 f"SELECT count(*) FROM `{catalog}`.`{layer_schema['bronze']}`.`ads_campaigns` "

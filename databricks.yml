@@ -9,7 +9,7 @@ variables:
     description: Unity Catalog catalog used by the POC.
     default: main
   schema_prefix:
-    description: Prefix for bronze, silver, gold, and platinum schemas.
+    description: Prefix for Bronze, Silver, Gold, and domain-specific Platinum mart schemas.
     default: medallion_poc
   volume_name:
     description: Unity Catalog volume used for arriving source files.

@@ -1,0 +1,93 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 58d61b9c-e987-45dd-9cb3-fe1ab9368736
+name: platinum_sales_mart
+version: 2.0.0
+status: active
+domain: sales-analytics
+description:
+  purpose: Sales data mart containing an order-line fact, virtual dimensions, and a flattened sales report.
+  usage: Semantic models, dashboards, and analytical queries.
+  limitations: Contains the current customer and product descriptions rather than historical SCD snapshots.
+team:
+  name: analytics-engineering
+  members:
+    - username: sales-analytics-owner
+      role: Data Product Owner
+slaProperties:
+  - property: frequency
+    value: 5
+    unit: minutes
+schema:
+  - name: sales_detail
+    physicalName: <catalog>.<schema_prefix>_platinum_sales.sales_detail
+    physicalType: materialized view
+    logicalType: object
+    dataGranularityDescription: One row per ERP order_line_id.
+    properties:
+      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: order_id, logicalType: string, required: true}
+      - {name: order_date, logicalType: date, required: true, semanticType: dimension}
+      - {name: customer_number, logicalType: string, required: true, semanticType: dimension}
+      - {name: country_code, logicalType: string, required: true, semanticType: dimension}
+      - {name: product_name, logicalType: string, required: true, semanticType: dimension}
+      - {name: product_family, logicalType: string, required: true, semanticType: dimension}
+      - {name: product_tier, logicalType: string, required: true, semanticType: dimension}
+      - {name: quantity, logicalType: integer, required: true, semanticType: measure}
+      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
+      - {name: currency_code, logicalType: string, required: true, semanticType: dimension}
+  - name: fact_sales
+    physicalName: <catalog>.<schema_prefix>_platinum_sales.fact_sales
+    physicalType: materialized view
+    logicalType: object
+    description: Materialized directly from Gold fact_sales; joins mart dimensions by customer_key and product_key.
+    dataGranularityDescription: One row per ERP order_line_id.
+    properties:
+      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: order_id, logicalType: string, required: true}
+      - {name: order_timestamp, logicalType: timestamp, required: true}
+      - {name: order_date, logicalType: date, required: true}
+      - {name: customer_key, logicalType: string, required: true}
+      - {name: product_key, logicalType: string, required: true}
+      - {name: campaign_code, logicalType: string, required: false}
+      - {name: quantity, logicalType: integer, required: true, semanticType: measure}
+      - {name: unit_price, logicalType: number, required: true, semanticType: measure}
+      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
+      - {name: currency_code, logicalType: string, required: true}
+      - {name: order_status, logicalType: string, required: true}
+  - name: dim_customer
+    physicalName: <catalog>.<schema_prefix>_platinum_sales.dim_customer
+    physicalType: view
+    logicalType: object
+    description: Virtual SELECT * view over Gold dim_customer; Gold enforces its required fields and enumerations.
+    dataGranularityDescription: One current row per ERP customer_id.
+    properties:
+      - {name: customer_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: customer_id, logicalType: string, required: true, unique: true}
+      - {name: customer_number, logicalType: string, required: true}
+      - {name: country_code, logicalType: string, required: true}
+      - {name: crm_contact_id, logicalType: string, required: false}
+      - {name: email, logicalType: string, required: false, classification: confidential}
+      - {name: marketing_consent, logicalType: boolean, required: false}
+      - {name: acquisition_channel, logicalType: string, required: false}
+      - name: enrichment_status
+        logicalType: string
+        required: true
+        enum:
+          - {value: ERP_ONLY}
+          - {value: CRM_ENRICHED}
+  - name: dim_product
+    physicalName: <catalog>.<schema_prefix>_platinum_sales.dim_product
+    physicalType: view
+    logicalType: object
+    description: Virtual SELECT * view over Gold dim_product; Gold enforces its required fields.
+    dataGranularityDescription: One current row per ERP product_id.
+    properties:
+      - {name: product_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
+      - {name: product_id, logicalType: string, required: true, unique: true}
+      - {name: product_name, logicalType: string, required: true}
+      - {name: product_family, logicalType: string, required: true}
+      - {name: product_tier, logicalType: string, required: true}
+      - {name: product_format, logicalType: string, required: true}
+      - {name: product_orientation, logicalType: string, required: true}
+      - {name: active, logicalType: boolean, required: true}

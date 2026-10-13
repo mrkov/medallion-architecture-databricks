@@ -62,9 +62,9 @@ def test_generated_lakeflow_rules_are_current(repository_root):
 
 
 def test_compatibility_allows_nullable_additions(repository_root):
-    previous = load_yaml(repository_root / "contracts/platinum/sales_datamart.odcs.yaml")
+    previous = load_yaml(repository_root / "contracts/platinum/sales_mart.odcs.yaml")
     current = copy.deepcopy(previous)
-    current["version"] = "1.1.0"
+    current["version"] = "2.1.0"
     current["schema"][0]["properties"].append(
         {"name": "optional_label", "logicalType": "string", "required": False}
     )
@@ -72,13 +72,13 @@ def test_compatibility_allows_nullable_additions(repository_root):
 
 
 def test_compatibility_detects_removed_or_retyped_fields(repository_root):
-    previous = load_yaml(repository_root / "contracts/platinum/sales_datamart.odcs.yaml")
+    previous = load_yaml(repository_root / "contracts/platinum/sales_mart.odcs.yaml")
     current = copy.deepcopy(previous)
     properties = current["schema"][0]["properties"]
     properties[:] = [prop for prop in properties if prop["name"] != "currency_code"]
     next(prop for prop in properties if prop["name"] == "line_amount")["logicalType"] = "string"
     assert breaking_changes(previous, current) == [
-        "changed type of sales_datamart.line_amount",
-        "removed property sales_datamart.currency_code",
+        "changed type of sales_detail.line_amount",
+        "removed property sales_detail.currency_code",
     ]
 
