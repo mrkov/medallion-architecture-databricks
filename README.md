@@ -145,8 +145,10 @@ the checked-in resources with the trigger, preserving the same job/pipeline IDs.
 or paused while running setup to avoid concurrent bootstrap and triggered updates. The setup notebook alone only provisions storage;
 use the setup **job** for the complete initialization.
 
-The explicit resource `pause_status` is controlled by `gold_trigger_status`; the development target also
-allows unpaused triggers. Check **Gold on Silver changes → Schedules & Triggers** after deployment.
+The explicit resource `pause_status` is controlled by `gold_trigger_status`. The target is named `dev`,
+but deliberately omits `mode: development`: that mode forbids an UNPAUSED trigger preset and applies
+development defaults that pause automatic triggers. Check **Gold on Silver changes → Schedules & Triggers**
+after deployment.
 Normal deployments default to UNPAUSED. Use `--var gold_trigger_status=PAUSED` when pausing for setup/maintenance.
 The setup does not require an API credential inside a notebook or notebook-driven changes to job schedules.
 

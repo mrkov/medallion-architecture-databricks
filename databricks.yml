@@ -28,10 +28,8 @@ sync:
 
 targets:
   dev:
-    mode: development
+    # Use default bundle behavior so the POC's automatic Gold trigger can run.
     default: true
-    presets:
-      trigger_pause_status: UNPAUSED
   prod:
     mode: production
 
