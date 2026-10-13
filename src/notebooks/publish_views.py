@@ -5,7 +5,7 @@
 # MAGIC Leave bundle_root empty when opening this notebook from the bundle's src/notebooks folder.
 
 # COMMAND ----------
-# MAGIC %pip install open-data-contract-standard==3.2.0 "sqlglot>=27,<28"
+# MAGIC %pip install open-data-contract-standard==3.2.0 "sqlglot==27.29.0"
 
 # COMMAND ----------
 import sys

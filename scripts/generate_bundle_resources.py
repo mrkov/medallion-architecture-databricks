@@ -60,7 +60,7 @@ def resources(contracts, bootstrap=False):
             "serverless": True,
             "continuous": False,
             "photon": True,
-            "environment": {"dependencies": ["open-data-contract-standard==3.2.0", "sqlglot>=27,<28"]},
+            "environment": {"dependencies": ["open-data-contract-standard==3.2.0", "sqlglot==27.29.0"]},
             "libraries": (
                 [{"file": {"path": "../src/pipelines/gold.py"}}]
                 if owner == "gold"

@@ -91,7 +91,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3,<9" },
     { name = "pyyaml", specifier = ">=6.0.2,<7" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.9,<1" },
-    { name = "sqlglot", specifier = ">=27,<28" },
+    { name = "sqlglot", specifier = "==27.29.0" },
 ]
 provides-extras = ["dev"]
 
