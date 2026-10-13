@@ -2,29 +2,61 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 8e93ef48-81ab-4756-859b-bd02d60616c4
 name: crm_source_files
-version: 1.0.0
+version: 2.0.0
 status: active
 domain: customer
 customProperties:
-  - {property: source_system, value: crm}
+- property: source_system
+  value: crm
 description:
   purpose: CRM contact data arriving independently from ERP orders.
   usage: Append-only ingestion into the Bronze CRM schema.
 team:
   name: customer-data
   members:
-    - username: crm-owner
-      role: Data Product Owner
+  - username: crm-owner
+    role: Data Product Owner
 schema:
-  - name: crm_contacts
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per CRM contact version.
-    properties:
-      - {name: contact_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: erp_customer_id, logicalType: string, required: true}
-      - {name: email, logicalType: string, required: true, classification: confidential}
-      - {name: marketing_consent, logicalType: string, required: true}
-      - {name: acquisition_channel, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-
+- name: crm_contacts
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per CRM contact version.
+  properties:
+  - name: contact_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: erp_customer_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: email
+    logicalType: string
+    required: true
+    classification: confidential
+    physicalType: STRING
+  - name: marketing_consent
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: acquisition_channel
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_crm.crm_contacts
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - contact_id: CRM100
+        erp_customer_id: C100
+        email: customer100@example.test
+        marketing_consent: 'true'
+        acquisition_channel: Paid Social
+        updated_at: '2026-10-01T11:00:00Z'

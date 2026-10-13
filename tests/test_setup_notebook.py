@@ -3,71 +3,96 @@ import re
 import sys
 from types import SimpleNamespace
 
-import pytest
+from medallion_poc.demo import seed_source, wait_for_assertions
+from medallion_poc.workspace import prepare_storage
 
-from medallion_poc.contracts import load_contract_catalog
 
-
-def test_setup_notebook_creates_storage_and_preserves_existing_data(repository_root, monkeypatch):
-    monkeypatch.setattr(sys, "path", sys.path.copy())
-    parameters = {
-        "catalog": "main",
-        "schema_prefix": "customer_poc",
-        "volume_name": "arrivals",
-        "bundle_root": str(repository_root),
-    }
-    schemas = {("main", "customer_poc_bronze")}
+def test_setup_is_repeatable_without_deleting_data(contracts):
+    schemas = set()
     volumes = set()
     directories = set()
-    files = {"/Volumes/main/customer_poc_landing/arrivals/crm/crm_contacts/existing.csv": "original CRM payload"}
-    tables = {"main.customer_poc_bronze.crm_contacts": [{"contact_id": "CRM_EXISTING"}]}
-    original_files = copy.deepcopy(files)
-    original_tables = copy.deepcopy(tables)
+    files = {"/Volumes/main/bronze_erp/landing/existing.csv": "original"}
+    original = copy.deepcopy(files)
 
     def sql(query):
-        if match := re.fullmatch(r"CREATE SCHEMA IF NOT EXISTS `([^`]+)`\.`([^`]+)`", query):
-            schemas.add(match.groups())
-        elif match := re.fullmatch(r"CREATE VOLUME IF NOT EXISTS `([^`]+)`\.`([^`]+)`\.`([^`]+)`", query):
-            assert match.groups()[:2] in schemas
-            volumes.add(match.groups())
+        if m := re.fullmatch(r"CREATE SCHEMA IF NOT EXISTS `([^`]+)`\.`([^`]+)`", query):
+            schemas.add(m.groups())
+        elif m := re.fullmatch(r"CREATE VOLUME IF NOT EXISTS `([^`]+)`\.`([^`]+)`\.`([^`]+)`", query):
+            assert m.groups()[:2] in schemas
+            volumes.add(m.groups())
         else:
-            raise AssertionError(f"Unexpected setup SQL: {query}")
+            raise AssertionError(query)
 
-    def mkdirs(directory):
-        assert tuple(directory.split("/")[2:5]) in volumes, "The landing volume must exist before source folders"
-        directories.add(directory)
+    def mkdirs(path):
+        assert tuple(path.split("/")[2:5]) in volumes
+        directories.add(path)
 
-    def forbidden(*args):
-        raise AssertionError("Setup must not delete or overwrite source files")
-
-    dbutils = SimpleNamespace(
-        widgets=SimpleNamespace(text=lambda *args: None, get=parameters.__getitem__),
-        fs=SimpleNamespace(mkdirs=mkdirs, rm=forbidden, put=forbidden),
-    )
-    spark = SimpleNamespace(sql=sql)
-    path = repository_root / "src/notebooks/setup_poc.py"
     for _ in range(2):
-        namespace = {"__name__": "__notebook__", "dbutils": dbutils, "spark": spark}
-        exec(compile(path.read_text(), str(path), "exec"), namespace)
-        assert "__file__" not in namespace
+        prepare_storage(
+            SimpleNamespace(sql=sql), SimpleNamespace(fs=SimpleNamespace(mkdirs=mkdirs)), contracts, "main", "landing"
+        )
     assert schemas == {
-        ("main", f"customer_poc_{suffix}")
-        for suffix in ("landing", "bronze", "silver", "gold", "platinum", "platinum_sales", "platinum_marketing")
+        ("main", s)
+        for s in (
+            "bronze_erp",
+            "bronze_crm",
+            "bronze_ads",
+            "silver_erp",
+            "silver_crm",
+            "silver_ads",
+            "gold_common",
+            "platinum_sales",
+            "platinum_marketing",
+        )
     }
-    assert volumes == {("main", "customer_poc_landing", "arrivals")}
-    sources = load_contract_catalog(repository_root / "contracts").sources
-    assert directories == {
-        f"/Volumes/main/customer_poc_landing/arrivals/{source.source_system}/{source.object_name}"
-        for source in sources.values()
+    assert len(volumes) == 3
+    assert len(directories) == 7
+    assert files == original
+
+
+def test_setup_notebook_can_execute_without_file_global(repository_root, monkeypatch):
+    monkeypatch.setattr(sys, "path", sys.path.copy())
+    params = {"catalog": "main", "volume_name": "landing", "bundle_root": str(repository_root)}
+    namespace = {
+        "spark": SimpleNamespace(sql=lambda query: None),
+        "dbutils": SimpleNamespace(
+            widgets=SimpleNamespace(text=lambda *args: None, get=params.__getitem__),
+            fs=SimpleNamespace(mkdirs=lambda path: None),
+        ),
     }
-    assert files == original_files
-    assert tables == original_tables
-    resolve = namespace["bundle_root_from_notebook_path"]
-    assert str(resolve("/Users/test/.bundle/poc/dev/files/src/notebooks/setup_poc")) == (
-        "/Workspace/Users/test/.bundle/poc/dev/files"
+    path = repository_root / "src/notebooks/setup_poc.py"
+    exec(compile(path.read_text(), str(path), "exec"), namespace)
+    assert "__file__" not in namespace
+
+
+def test_demo_seed_is_append_only_and_uses_contract_columns(contracts):
+    files = {}
+
+    def put(path, text, overwrite):
+        assert not overwrite and path not in files
+        files[path] = text
+
+    fs = SimpleNamespace(
+        ls=lambda folder: [SimpleNamespace(path=path) for path in files if path.startswith(folder + "/")],
+        put=put,
+        head=lambda path, size: files[path],
     )
-    assert str(resolve("/Workspace/Users/test/.bundle/poc/dev/files/src/notebooks/setup_poc")) == (
-        "/Workspace/Users/test/.bundle/poc/dev/files"
-    )
-    with pytest.raises(ValueError, match="bundle_root widget"):
-        resolve("/Users/test/another_folder/setup_poc")
+    dbutils = SimpleNamespace(fs=fs)
+    seed_source(dbutils, contracts, "erp", "main", "landing")
+    before = files.copy()
+    seed_source(dbutils, contracts, "erp", "main", "landing")
+    assert files == before
+    for name, source in contracts.sources.items():
+        if source.source_system == "erp":
+            text = next(text for path, text in files.items() if "/" + name + "/" in path)
+            assert text.splitlines()[0] == ",".join(source.columns)
+
+
+def test_demo_wait_reports_a_disabled_or_broken_trigger(contracts, monkeypatch):
+    import pytest
+
+    spark = SimpleNamespace(sql=lambda query: SimpleNamespace(collect=lambda: []))
+    with pytest.raises(TimeoutError, match="table-update trigger"):
+        wait_for_assertions(
+            spark, [{"name": "late arrival", "query": "SELECT 1", "equals": 1}], contracts, "main", timeout_seconds=0
+        )

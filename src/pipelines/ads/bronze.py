@@ -1,5 +1,7 @@
-"""Append-only ADS Bronze streaming tables."""
+"""Register datasets from deployed ODCS contracts."""
 # ruff: noqa: E402
+
+from __future__ import annotations
 
 # Lakeflow can evaluate source without __file__. The bundle supplies the deployed root.
 import sys
@@ -18,26 +20,6 @@ for directory in ("src", "src/pipelines"):
     if import_path not in sys.path:
         sys.path.insert(0, import_path)
 
-from contract_loader import SOURCE_EXPECTATIONS
-from pipeline_common import read_landing, table_name
-from pyspark import pipelines as dp
+from pipeline_common import register_bronze
 
-
-@dp.table(
-    name=table_name("bronze", "ads_campaigns"),
-    comment="Exact advertising campaign payload as strings plus ingestion metadata.",
-    table_properties={"layer": "bronze", "source_system": "ads"},
-)
-@dp.expect_all(SOURCE_EXPECTATIONS["ads_campaigns"])
-def bronze_ads_campaigns():
-    return read_landing("ads_campaigns")
-
-
-@dp.table(
-    name=table_name("bronze", "ads_spend"),
-    comment="Exact advertising spend payload as strings plus ingestion metadata.",
-    table_properties={"layer": "bronze", "source_system": "ads"},
-)
-@dp.expect_all(SOURCE_EXPECTATIONS["ads_spend"])
-def bronze_ads_spend():
-    return read_landing("ads_spend")
+register_bronze("ads")

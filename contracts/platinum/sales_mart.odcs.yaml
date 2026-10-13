@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 58d61b9c-e987-45dd-9cb3-fe1ab9368736
 name: platinum_sales_mart
-version: 2.0.0
+version: 3.0.0
 status: active
 domain: sales-analytics
 description:
@@ -12,82 +12,390 @@ description:
 team:
   name: analytics-engineering
   members:
-    - username: sales-analytics-owner
-      role: Data Product Owner
+  - username: sales-analytics-owner
+    role: Data Product Owner
 slaProperties:
-  - property: frequency
-    value: 5
-    unit: minutes
+- property: frequency
+  value: 5
+  unit: minutes
 schema:
-  - name: sales_detail
-    physicalName: <catalog>.<schema_prefix>_platinum_sales.sales_detail
-    physicalType: materialized view
-    logicalType: object
-    dataGranularityDescription: One row per ERP order_line_id.
-    properties:
-      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: order_id, logicalType: string, required: true}
-      - {name: order_date, logicalType: date, required: true, semanticType: dimension}
-      - {name: customer_number, logicalType: string, required: true, semanticType: dimension}
-      - {name: country_code, logicalType: string, required: true, semanticType: dimension}
-      - {name: product_name, logicalType: string, required: true, semanticType: dimension}
-      - {name: product_family, logicalType: string, required: true, semanticType: dimension}
-      - {name: product_tier, logicalType: string, required: true, semanticType: dimension}
-      - {name: quantity, logicalType: integer, required: true, semanticType: measure}
-      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
-      - {name: currency_code, logicalType: string, required: true, semanticType: dimension}
-  - name: fact_sales
-    physicalName: <catalog>.<schema_prefix>_platinum_sales.fact_sales
-    physicalType: materialized view
-    logicalType: object
-    description: Materialized directly from Gold fact_sales; joins mart dimensions by customer_key and product_key.
-    dataGranularityDescription: One row per ERP order_line_id.
-    properties:
-      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: order_id, logicalType: string, required: true}
-      - {name: order_timestamp, logicalType: timestamp, required: true}
-      - {name: order_date, logicalType: date, required: true}
-      - {name: customer_key, logicalType: string, required: true}
-      - {name: product_key, logicalType: string, required: true}
-      - {name: campaign_code, logicalType: string, required: false}
-      - {name: quantity, logicalType: integer, required: true, semanticType: measure}
-      - {name: unit_price, logicalType: number, required: true, semanticType: measure}
-      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
-      - {name: currency_code, logicalType: string, required: true}
-      - {name: order_status, logicalType: string, required: true}
-  - name: dim_customer
-    physicalName: <catalog>.<schema_prefix>_platinum_sales.dim_customer
-    physicalType: view
-    logicalType: object
-    description: Virtual SELECT * view over Gold dim_customer; Gold enforces its required fields and enumerations.
-    dataGranularityDescription: One current row per ERP customer_id.
-    properties:
-      - {name: customer_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: customer_id, logicalType: string, required: true, unique: true}
-      - {name: customer_number, logicalType: string, required: true}
-      - {name: country_code, logicalType: string, required: true}
-      - {name: crm_contact_id, logicalType: string, required: false}
-      - {name: email, logicalType: string, required: false, classification: confidential}
-      - {name: marketing_consent, logicalType: boolean, required: false}
-      - {name: acquisition_channel, logicalType: string, required: false}
-      - name: enrichment_status
-        logicalType: string
-        required: true
-        enum:
-          - {value: ERP_ONLY}
-          - {value: CRM_ENRICHED}
-  - name: dim_product
-    physicalName: <catalog>.<schema_prefix>_platinum_sales.dim_product
-    physicalType: view
-    logicalType: object
-    description: Virtual SELECT * view over Gold dim_product; Gold enforces its required fields.
-    dataGranularityDescription: One current row per ERP product_id.
-    properties:
-      - {name: product_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: product_id, logicalType: string, required: true, unique: true}
-      - {name: product_name, logicalType: string, required: true}
-      - {name: product_family, logicalType: string, required: true}
-      - {name: product_tier, logicalType: string, required: true}
-      - {name: product_format, logicalType: string, required: true}
-      - {name: product_orientation, logicalType: string, required: true}
-      - {name: active, logicalType: boolean, required: true}
+- name: sales_detail
+  physicalName: <catalog>.platinum_sales.sales_detail
+  physicalType: view
+  logicalType: object
+  dataGranularityDescription: One row per ERP order_line_id.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: sales.order_line_id
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: sales.order_id
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: order_date
+    logicalType: date
+    required: true
+    semanticType: dimension
+    physicalType: DATE
+    transformLogic: sales.order_date
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: customer_number
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: customer.customer_number
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: country_code
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: customer.country_code
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: product_name
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: product.product_name
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: product_family
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: product.product_family
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: product_tier
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: product.product_tier
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: quantity
+    logicalType: integer
+    required: true
+    semanticType: measure
+    physicalType: INT
+    transformLogic: sales.quantity
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: line_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: sales.line_amount
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  - name: currency_code
+    logicalType: string
+    required: true
+    semanticType: dimension
+    physicalType: STRING
+    transformLogic: sales.currency_code
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+    - gold.dim_product
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        sales: gold.fact_sales
+        customer: gold.dim_customer
+        product: gold.dim_product
+      from_sql: '{{ sales }} AS sales JOIN {{ customer }} AS customer ON sales.customer_key = customer.customer_key JOIN
+        {{ product }} AS product ON sales.product_key = product.product_key'
+- name: fact_sales
+  physicalName: <catalog>.platinum_sales.fact_sales
+  physicalType: view
+  logicalType: object
+  description: Contract-defined ordinary SQL view over Gold.
+  dataGranularityDescription: One row per ERP order_line_id.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.order_line_id
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.order_id
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: order_timestamp
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.order_timestamp
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: order_date
+    logicalType: date
+    required: true
+    physicalType: DATE
+    transformLogic: src.order_date
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: customer_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.customer_key
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: product_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_key
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: campaign_code
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: quantity
+    logicalType: integer
+    required: true
+    physicalType: INT
+    transformLogic: src.quantity
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: unit_price
+    logicalType: number
+    required: true
+    physicalType: DECIMAL(18,2)
+    transformLogic: src.unit_price
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: line_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: src.line_amount
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: currency_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.currency_code
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: order_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.order_status
+    transformSourceObjects:
+    - gold.fact_sales
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: gold.fact_sales
+      from_sql: '{{ src }} AS src'
+- name: dim_customer
+  physicalName: <catalog>.platinum_sales.dim_customer
+  physicalType: view
+  logicalType: object
+  description: Contract-defined ordinary SQL view over Gold.
+  dataGranularityDescription: One current row per ERP customer_id.
+  properties:
+  - name: customer_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.customer_key
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: customer_id
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: customer_number
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.customer_number
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: country_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.country_code
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: crm_contact_id
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: src.crm_contact_id
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: email
+    logicalType: string
+    required: false
+    classification: confidential
+    physicalType: STRING
+    transformLogic: src.email
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: marketing_consent
+    logicalType: boolean
+    required: false
+    physicalType: BOOLEAN
+    transformLogic: src.marketing_consent
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: acquisition_channel
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: src.acquisition_channel
+    transformSourceObjects:
+    - gold.dim_customer
+  - name: enrichment_status
+    logicalType: string
+    required: true
+    enum:
+    - value: ERP_ONLY
+    - value: CRM_ENRICHED
+    physicalType: STRING
+    transformLogic: src.enrichment_status
+    transformSourceObjects:
+    - gold.dim_customer
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: gold.dim_customer
+      from_sql: '{{ src }} AS src'
+- name: dim_product
+  physicalName: <catalog>.platinum_sales.dim_product
+  physicalType: view
+  logicalType: object
+  description: Contract-defined ordinary SQL view over Gold.
+  dataGranularityDescription: One current row per ERP product_id.
+  properties:
+  - name: product_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.product_key
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_id
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: src.product_id
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_name
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_family
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_family
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_tier
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_tier
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_format
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_format
+    transformSourceObjects:
+    - gold.dim_product
+  - name: product_orientation
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_orientation
+    transformSourceObjects:
+    - gold.dim_product
+  - name: active
+    logicalType: boolean
+    required: true
+    physicalType: BOOLEAN
+    transformLogic: src.active
+    transformSourceObjects:
+    - gold.dim_product
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: gold.dim_product
+      from_sql: '{{ src }} AS src'

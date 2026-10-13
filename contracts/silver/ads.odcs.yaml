@@ -1,0 +1,172 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 9e2846d5-52a3-44d1-8f8d-a22a321bfa47-silver
+name: silver_ads
+version: 2.0.0
+status: active
+domain: marketing
+customProperties:
+- property: source_system
+  value: ads
+description:
+  purpose: Campaign metadata and daily advertising spend arriving after ERP and CRM.
+  usage: Append-only ingestion into the Bronze advertising schema.
+team:
+  name: marketing-data
+  members:
+  - username: marketing-owner
+    role: Data Product Owner
+schema:
+- name: ads_campaigns
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per advertising campaign version.
+  properties:
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - bronze.ads_campaigns
+  - name: campaign_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.campaign_name
+    transformSourceObjects:
+    - bronze.ads_campaigns
+  - name: platform
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.platform
+    transformSourceObjects:
+    - bronze.ads_campaigns
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.ads_campaigns
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_ads.ads_campaigns
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.ads_campaigns
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks: {}
+- name: ads_spend
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per campaign and spend date.
+  properties:
+  - name: spend_date
+    logicalType: date
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: DATE
+    transformLogic: src.spend_date
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 2
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: spend_amount
+    logicalType: number
+    required: true
+    physicalType: DECIMAL(18,2)
+    transformLogic: src.spend_amount
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: clicks
+    logicalType: integer
+    required: true
+    physicalType: BIGINT
+    transformLogic: src.clicks
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: impressions
+    logicalType: integer
+    required: true
+    physicalType: BIGINT
+    transformLogic: src.impressions
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.ads_spend
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_ads.ads_spend
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.ads_spend
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks:
+        spend_amount_valid: spend_amount >= 0
+        clicks_valid: clicks >= 0
+        impressions_valid: impressions >= 0

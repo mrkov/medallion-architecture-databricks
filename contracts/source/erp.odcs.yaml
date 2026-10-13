@@ -2,11 +2,12 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d
 name: erp_source_files
-version: 1.0.0
+version: 2.0.0
 status: active
 domain: commerce
 customProperties:
-  - {property: source_system, value: erp}
+- property: source_system
+  value: erp
 description:
   purpose: Raw ERP interfaces for customers, products, orders, and order lines.
   usage: Append-only ingestion into the Bronze ERP schema.
@@ -14,56 +15,179 @@ description:
 team:
   name: commerce-data
   members:
-    - username: commerce-owner
-      role: Data Product Owner
+  - username: commerce-owner
+    role: Data Product Owner
 schema:
-  - name: erp_customers
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per ERP customer version.
-    properties:
-      - {name: customer_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: customer_number, logicalType: string, required: true}
-      - {name: country_code, logicalType: string, required: true}
-      - {name: created_at, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-  - name: erp_products
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per ERP product version.
-    properties:
-      - {name: product_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: product_name, logicalType: string, required: true}
-      - name: product_hierarchy
-        logicalType: string
-        required: true
-        description: Pipe-delimited family, tier, format, and orientation.
-        examples: [PHOTOBOOK|PREMIUM|A4|LANDSCAPE]
-        logicalTypeOptions:
-          pattern: '^[^|]+\|[^|]+\|[^|]+\|[^|]+$'
-      - {name: active_flag, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-  - name: erp_orders
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per ERP order version.
-    properties:
-      - {name: order_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: customer_id, logicalType: string, required: true}
-      - {name: order_timestamp, logicalType: string, required: true}
-      - {name: order_status, logicalType: string, required: true}
-      - {name: currency_code, logicalType: string, required: true}
-      - {name: campaign_code, logicalType: string, required: false}
-      - {name: updated_at, logicalType: string, required: true}
-  - name: erp_order_lines
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per ERP order-line version.
-    properties:
-      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: order_id, logicalType: string, required: true}
-      - {name: product_id, logicalType: string, required: true}
-      - {name: quantity, logicalType: string, required: true}
-      - {name: unit_price, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-
+- name: erp_customers
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per ERP customer version.
+  properties:
+  - name: customer_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: customer_number
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: country_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: created_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_erp.erp_customers
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - customer_id: C100
+        customer_number: CUST-100
+        country_code: CH
+        created_at: '2026-10-01T09:00:00Z'
+        updated_at: '2026-10-01T09:00:00Z'
+- name: erp_products
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per ERP product version.
+  properties:
+  - name: product_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: product_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: product_hierarchy
+    logicalType: string
+    required: true
+    description: Pipe-delimited family, tier, format, and orientation.
+    examples:
+    - PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+    logicalTypeOptions:
+      pattern: ^[^|]+\|[^|]+\|[^|]+\|[^|]+$
+    physicalType: STRING
+  - name: active_flag
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_erp.erp_products
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - product_id: P100
+        product_name: Premium Photo Book
+        product_hierarchy: PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+        active_flag: 'true'
+        updated_at: '2026-10-01T09:00:00Z'
+      - product_id: P_BAD
+        product_name: Broken Hierarchy
+        product_hierarchy: PHOTOBOOK|PREMIUM|A4
+        active_flag: 'true'
+        updated_at: '2026-10-01T09:00:00Z'
+- name: erp_orders
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per ERP order version.
+  properties:
+  - name: order_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: customer_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: order_timestamp
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: order_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: currency_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: campaign_code
+    logicalType: string
+    required: false
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_erp.erp_orders
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - order_id: O100
+        customer_id: C100
+        order_timestamp: '2026-10-01T10:00:00Z'
+        order_status: CONFIRMED
+        currency_code: CHF
+        campaign_code: META_FALL_2026
+        updated_at: '2026-10-01T10:00:00Z'
+- name: erp_order_lines
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per ERP order-line version.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: product_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: quantity
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: unit_price
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_erp.erp_order_lines
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - order_line_id: OL100
+        order_id: O100
+        product_id: P100
+        quantity: '2'
+        unit_price: '29.90'
+        updated_at: '2026-10-01T10:00:00Z'

@@ -1,0 +1,102 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 8e93ef48-81ab-4756-859b-bd02d60616c4-silver
+name: silver_crm
+version: 2.0.0
+status: active
+domain: customer
+customProperties:
+- property: source_system
+  value: crm
+description:
+  purpose: CRM contact data arriving independently from ERP orders.
+  usage: Append-only ingestion into the Bronze CRM schema.
+team:
+  name: customer-data
+  members:
+  - username: crm-owner
+    role: Data Product Owner
+schema:
+- name: crm_contacts
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per CRM contact version.
+  properties:
+  - name: contact_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.contact_id
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: erp_customer_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.erp_customer_id
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: email
+    logicalType: string
+    required: true
+    classification: confidential
+    physicalType: STRING
+    transformLogic: src.email
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: marketing_consent
+    logicalType: boolean
+    required: true
+    physicalType: BOOLEAN
+    transformLogic: CASE WHEN lower(trim(src.marketing_consent)) IN ('1','true','y','yes') THEN true WHEN lower(trim(src.marketing_consent))
+      IN ('0','false','n','no') THEN false END
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: acquisition_channel
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.acquisition_channel
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.crm_contacts
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_crm.crm_contacts
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.crm_contacts
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks: {}

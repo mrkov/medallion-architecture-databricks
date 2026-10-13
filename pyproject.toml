@@ -11,10 +11,12 @@ dependencies = [
   "jsonschema>=4.23,<5",
   "open-data-contract-standard==3.2.0",
   "PyYAML>=6.0.2,<7",
+  "sqlglot>=27,<28",
 ]
 
 [project.optional-dependencies]
 dev = [
+  "pyspark==4.0.1",
   "pytest>=8.3,<9",
   "ruff>=0.9,<1",
 ]

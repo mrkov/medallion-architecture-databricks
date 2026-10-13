@@ -2,38 +2,95 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 9e2846d5-52a3-44d1-8f8d-a22a321bfa47
 name: advertising_source_files
-version: 1.0.0
+version: 2.0.0
 status: active
 domain: marketing
 customProperties:
-  - {property: source_system, value: ads}
+- property: source_system
+  value: ads
 description:
   purpose: Campaign metadata and daily advertising spend arriving after ERP and CRM.
   usage: Append-only ingestion into the Bronze advertising schema.
 team:
   name: marketing-data
   members:
-    - username: marketing-owner
-      role: Data Product Owner
+  - username: marketing-owner
+    role: Data Product Owner
 schema:
-  - name: ads_campaigns
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per advertising campaign version.
-    properties:
-      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_name, logicalType: string, required: true}
-      - {name: platform, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-  - name: ads_spend
-    physicalType: file
-    logicalType: object
-    dataGranularityDescription: One source record per campaign and spend date.
-    properties:
-      - {name: spend_date, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
-      - {name: spend_amount, logicalType: string, required: true}
-      - {name: clicks, logicalType: string, required: true}
-      - {name: impressions, logicalType: string, required: true}
-      - {name: updated_at, logicalType: string, required: true}
-
+- name: ads_campaigns
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per advertising campaign version.
+  properties:
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: campaign_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: platform
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_ads.ads_campaigns
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - campaign_code: META_FALL_2026
+        campaign_name: Fall Photo Books 2026
+        platform: Meta
+        updated_at: '2026-10-01T12:00:00Z'
+        placement_type: Feed
+- name: ads_spend
+  physicalType: file
+  logicalType: object
+  dataGranularityDescription: One source record per campaign and spend date.
+  properties:
+  - name: spend_date
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 2
+    physicalType: STRING
+  - name: spend_amount
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: clicks
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: impressions
+    logicalType: string
+    required: true
+    physicalType: STRING
+  - name: updated_at
+    logicalType: string
+    required: true
+    physicalType: STRING
+  physicalName: <catalog>.bronze_ads.ads_spend
+  customProperties:
+  - property: poc
+    value:
+      demo_rows:
+      - spend_date: '2026-10-01'
+        campaign_code: META_FALL_2026
+        spend_amount: '20.00'
+        clicks: '80'
+        impressions: '4000'
+        updated_at: '2026-10-01T12:00:00Z'

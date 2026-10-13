@@ -1,327 +1,224 @@
-# Four-layer Databricks medallion POC
+# Four-layer Databricks POC driven by ODCS
 
-This repository demonstrates an Ifolor-style commerce platform implemented with Lakeflow Declarative Pipelines (formerly Delta Live Tables), Unity Catalog, Databricks Asset Bundles, and executable Open Data Contract Standard (ODCS) v3.2.0 contracts.
+An Ifolor-style ERP, CRM and advertising example using Unity Catalog, Lakeflow Declarative Pipelines,
+Lakeflow Jobs and ODCS v3.2.0. Source jobs run independently and finish at Silver. A **table-update trigger**
+observes Silver changes and starts Gold. Platinum contains ordinary views over Gold.
 
-The POC answers two questions:
-
-1. How can Bronze, Silver, Gold, and Platinum have explicit responsibilities and dependency rules?
-2. How does a Gold record converge when ERP, CRM, and advertising sources arrive at different times?
-
-## Architecture
-
-```text
-ERP arrival ─> ERP pipeline: Bronze ─> Silver ──┐
-CRM arrival ─> CRM pipeline: Bronze ─> Silver ──┼─> Gold pipeline ─> Platinum pipeline
-Ads arrival ─> Ads pipeline: Bronze ─> Silver ──┘
-                     source jobs trigger ────────────────^
+```mermaid
+flowchart LR
+  ERP[ERP job] --> BE[bronze_erp] --> SE[silver_erp]
+  CRM[CRM job] --> BC[bronze_crm] --> SC[silver_crm]
+  Ads[Ads job] --> BA[bronze_ads] --> SA[silver_ads]
+  SE --> Trigger[Silver table-update trigger]
+  SC --> Trigger
+  SA --> Trigger
+  Trigger --> Gold[Gold pipeline: gold_common]
+  Gold --> Sales[platinum_sales views]
+  Gold --> Marketing[platinum_marketing views]
 ```
 
-The bundle deploys five Lakeflow pipelines. ERP, CRM, and Ads each own an independent Bronze-to-Silver
-pipeline. Gold and Platinum each have their own pipeline. The three source ingestion jobs invoke the same
-queued `curated_refresh` job after their source pipeline succeeds, so source schedules can differ without
-duplicating curated logic.
+## Schemas and ownership
 
-Bronze and Silver code is separated by source:
-
-```text
-src/pipelines/
-├── erp/
-│   ├── bronze.py
-│   └── silver.py
-├── crm/
-│   ├── bronze.py
-│   └── silver.py
-├── ads/
-│   ├── bronze.py
-│   └── silver.py
-├── gold.py
-├── platinum.py
-├── pipeline_common.py
-├── silver_common.py
-└── contract_loader.py
-```
-
-Each source pipeline includes only its own folder. Gold and Platinum each include their own definition file.
-Shared ingestion, validation, deduplication, and quarantine helpers are imported from the pipeline root;
-they do not register datasets. Explicit library selection replaces the former `poc.pipeline_scope` filters.
-Adding another source means adding its Bronze/Silver files and its pipeline resource.
-
-This source-file refactor keeps the existing pipeline resource keys and fully qualified table names. Deploy
-the updated bundle using the same catalog, schema prefix, and target to retain table ownership and checkpoints.
-It does not require a full refresh or deletion of pipelines.
-
-| Layer | Responsibility | Enforcement |
+| Schema | Contents | Owner |
 |---|---|---|
-| Bronze | Append-only source copies; every payload field is a string | ODCS expectations observe violations without discarding raw data |
-| Silver | Typed, deduplicated, source-oriented records | Invalid records go to a quarantine table owned by that source |
-| Gold | Facts and dimensions with stable grain | Strict ODCS-derived expectations; every table reads Silver directly |
-| Platinum | Consumer-facing datamarts | Strict expectations; every object reads Gold directly |
+| `bronze_erp`, `bronze_crm`, `bronze_ads` | Append-only streaming tables, all payload columns strings; a `landing` volume in each schema | Respective source pipeline |
+| `silver_erp`, `silver_crm`, `silver_ads` | Typed, deduplicated materialized views and `contract_quarantine` | Respective source pipeline |
+| `gold_common` | Persisted facts/dimensions and `data_readiness`, implemented as Lakeflow materialized views | Gold pipeline |
+| `platinum_sales` | Ordinary views: `fact_sales`, `sales_detail`, `dim_customer`, `dim_product` | Published from ODCS |
+| `platinum_marketing` | Ordinary views: `fact_campaign_performance`, `dim_campaign` | Published from ODCS |
 
-Unity Catalog schemas are named `<schema_prefix>_bronze`, `_silver`, and `_gold`. Platinum is organized as
-two data marts: `<schema_prefix>_platinum_sales` and `<schema_prefix>_platinum_marketing`. Landing files use
-a managed volume in `<schema_prefix>_landing`.
+There is **no schema prefix**. Set `catalog` to isolate a deployment; schema names are exactly as shown.
+Gold materialized views store their results in Delta, as agreed for this POC. They are not ordinary virtual
+views. Every Gold definition reads Silver directly; every Platinum view reads Gold directly. Platinum
+views evaluate their Gold inputs when queried and require no data refresh job.
 
-## Platinum data marts
+Each source has its own `src/pipelines/<source>/bronze.py` and `silver.py`. These small entrypoints register
+that source's contracted datasets through shared code. All four pipelines use serverless compute.
+Source jobs have no schedule in this POC; each can acquire an independent schedule or arrival trigger.
 
-A data mart is a collection of related objects for a business domain. Each Platinum mart has its own schema
-and ODCS contract defining the complete collection, including its physical tables/views and grains.
+## What makes Gold refresh automatically
 
-| Mart schema (default prefix) | Materialized views containing facts/reports | Virtual dimension views |
-|---|---|---|
-| `medallion_poc_platinum_sales` | `fact_sales`, `sales_detail` | `dim_customer`, `dim_product` |
-| `medallion_poc_platinum_marketing` | `fact_campaign_performance` | `dim_campaign` |
+The `refresh_gold` job has a native `table_update` trigger:
 
-Sales consumers can join `fact_sales` to the dimension views by `customer_key` and `product_key` to form a star
-model. The existing flattened report is retained as `sales_detail` for consumers that prefer descriptive
-attributes in one object. Marketing consumers join their performance fact to `dim_campaign` by `campaign_code`.
+- It monitors the seven Silver interfaces referenced by Gold contracts, with `ANY_UPDATED` semantics.
+- It waits for 60 seconds without another watched update and allows at least 120 seconds between triggers.
+- Job concurrency is one, with queueing enabled.
+- Its sole task starts a normal Gold pipeline update. Source jobs never call this job.
 
-Facts and the reporting table are persisted as Lakeflow materialized views. Dimensions are ordinary Unity
-Catalog SQL views over Gold, so they always reflect the current Gold dimensions without duplicating storage.
-Every object reads Gold directly: `sales_detail` joins Gold facts and dimensions rather than other Platinum
-objects. One Platinum pipeline publishes both mart schemas; separate schemas do not require separate pipelines.
+The **Jobs trigger detects changes and starts execution**. Lakeflow then uses its dependency graph and
+refresh planner to maintain the Gold materialized views. The optimizer may reuse unchanged results,
+incrementally refresh, or recompute an output; incremental execution is not guaranteed for every query.
+Inspect the Gold pipeline event log for the actual plan and refresh costs.
 
-For example, query the Sales mart without accessing Gold:
+This is eventual, progressive enrichment: a debounce window is not an atomic multi-source batch barrier.
+A source can update several Silver tables at different moments. Gold can first show incomplete data and
+converge on a later update. `fact_attributed_sales` exposes `ERP_ONLY`, `CRM_ENRICHED`, then `COMPLETE`.
+`data_readiness` reports which sources have records and their latest timestamps. It does not certify that
+all data for a business period has arrived. A strict all-sources-complete process needs explicit source
+batch/completion markers and a readiness gate.
 
-```sql
-SELECT product.product_family, SUM(fact.line_amount) AS revenue
-FROM main.medallion_poc_platinum_sales.fact_sales AS fact
-JOIN main.medallion_poc_platinum_sales.dim_product AS product USING (product_key)
-GROUP BY product.product_family;
-```
+For a larger deployment, use refresh groups based on shared dependencies and freshness requirements, and
+increase the batching window where appropriate. Do not assume one trigger can watch an unlimited number
+of tables: check the workspace's current table-trigger limits. The seven-table example stays small.
 
-## How Gold knows when to update
+## Contracts are the executable source of truth
 
-Lakeflow lineage tells the Gold pipeline which Silver inputs changed and which Gold materialized views need
-recalculation. Lineage does not start a separate pipeline. A trigger still has to start the Gold pipeline.
+The runtime reads the YAML with the official
+[`open-data-contract-standard`](https://github.com/datacontract/open-data-contract-standard-python) library.
+The library supplies the ODCS models; this project's generic interpreter executes the documented SQL subset.
+ODCS itself is not a transformation engine.
 
-This POC makes that trigger explicit with Databricks Workflows:
+| Contract field | Runtime use |
+|---|---|
+| `schema[].physicalName` | Output table/view address and schema creation |
+| `properties[].name`, `logicalType`, `physicalType` | Ordered output columns and Spark SQL types |
+| `properties[].transformLogic` | Executed Spark SQL expression for that output column |
+| `properties[].transformSourceObjects` | Column lineage documentation, checked against declared object inputs |
+| `required`, `enum` | Lakeflow expectations and Silver rejection rules |
+| `primaryKey`, `primaryKeyPosition` | Silver deduplication keys and declared output grain |
+| `customProperties.poc.inputs` / `from_sql` | Input references, joins, subqueries and aggregations |
+| `customProperties.poc.order_by` | Silver's deterministic latest-record ordering |
+| `customProperties.poc.row_checks` | Named, row-level SQL predicates; false/null causes rejection |
+| `customProperties.poc.demo_rows` on source objects | Sample records for the staged demo |
 
-1. A source-specific job runs its Bronze-to-Silver pipeline.
-2. On success, it calls the shared `curated_refresh` job.
-3. `curated_refresh` runs Gold, creates the mart schemas and dimension views, then refreshes Platinum facts/reports.
-4. If source jobs finish close together, job queueing serializes the curated refresh requests.
+The `poc` values are an **ODCS custom-property extension defined by this repository**, not a portable ODCS
+execution standard. See [the execution profile](docs/contract-execution.md) for supported syntax and limits.
+Contract files are trusted, reviewed code: changing `transformLogic` changes executed SQL. The loader checks
+that object reads use declared input placeholders and the correct layer. It does not sandbox SQL functions.
 
-The source jobs are intentionally unscheduled. They can be started on demand for the POC. In production,
-each can have its own schedule or file-arrival/table-update trigger. A stricter model can place a readiness
-gate before Gold when the business requires all sources for a reporting period; this POC demonstrates
-progressive enrichment instead.
+Silver applies tolerant casts, records invalid rows in its source's quarantine, and keeps the latest valid
+row per primary key. Gold uses strict casts and failing expectations. Primary-key metadata does not create
+a database-enforced uniqueness constraint on a materialized view; the transformations and integration
+tests enforce/check the declared grains. Platinum projections specify columns rather than `SELECT *`.
 
-## Asynchronous arrival demonstration
-
-The bundle workflow initializes the three source interfaces, then runs three source-specific available-now
-updates and refreshes Gold and Platinum after each arrival:
-
-1. ERP publishes order `O100`. `fact_attributed_sales.completeness_status` is `ERP_ONLY`.
-2. CRM publishes the matching contact. The existing order is reevaluated and becomes `CRM_ENRICHED`.
-3. Advertising publishes campaign metadata and spend. The same order becomes `COMPLETE`; the Platinum marketing datamart reports CHF 59.80 attributed revenue, CHF 20.00 spend, and ROAS 2.99.
-
-The empty CRM and Ads interfaces are initialized before the first Gold update. This lets Gold publish useful
-ERP-only records before those sources have produced data, while preserving stable contracted Silver table
-interfaces.
-
-## Executable ODCS contracts
-
-Contracts live under [`contracts`](contracts) and use the official ODCS v3.2.0 schema. They define interface fields, logical types, required fields, enumerations, primary keys, grain, transformation lineage, ownership, and freshness objectives.
-
-The Platinum contracts [`sales_mart.odcs.yaml`](contracts/platinum/sales_mart.odcs.yaml) and
-[`marketing_mart.odcs.yaml`](contracts/platinum/marketing_mart.odcs.yaml) describe each complete data mart.
-Their versions are `2.0.0` because moving and renaming the consumer interfaces is a breaking change. Required
-fields on materialized outputs use compiled Platinum expectations; virtual dimensions inherit the enforced
-Gold constraints and the demo checks their grain and joins.
-
-The ODCS schema is fetched from the immutable `v3.2.0` Git tag and verified against a pinned SHA-256 checksum:
-
-```bash
-python scripts/fetch_odcs_schema.py
-```
-
-The source ODCS contracts are the source of truth for ingestion interfaces. Each source contract declares
-its landing source system using an ODCS custom property:
+The product split is executable YAML in [`contracts/silver/erp.odcs.yaml`](contracts/silver/erp.odcs.yaml):
 
 ```yaml
-customProperties:
-  - property: source_system
-    value: erp
+name: product_family
+physicalType: STRING
+transformLogic: trim(try_element_at(split(src.product_hierarchy, '[|]', -1), 1))
 ```
 
-Its `schema[].properties` define payload column names and their order. Source payloads must have
-`logicalType: string` to preserve the Bronze raw-data rule; the loader rejects typed Bronze payloads,
-duplicate fields, and conflicts with ingestion metadata.
+The four-part input `PHOTOBOOK|PREMIUM|A4|LANDSCAPE` produces family, tier, format and orientation.
+Missing/extra/empty segments are quarantined. `try_element_at` and `TRY_CAST` prevent invalid inputs from
+crashing under ANSI SQL. The raw hierarchy and original rejected payload remain available for diagnosis.
 
-The pipelines load the deployed YAML directly with the
-[`open-data-contract-standard`](https://github.com/datacontract/open-data-contract-standard-python) Python
-library, pinned to `3.2.0` to match the standard used by the POC:
+There are no business column lists, joins, SQL view definitions or embedded CSV strings in notebooks.
+`demo_control.py` was removed. Generic notebooks handle storage setup, view publication and example-file
+arrival. `demo/scenario.yaml` contains observations/expected results, not production transformations.
 
-```python
-from open_data_contract_standard.model import OpenDataContractStandard
+## Deploy and set up
 
-contract = OpenDataContractStandard.from_file("contracts/source/erp.odcs.yaml")
-```
+Requirements: Databricks CLI, Python 3.11+ and uv to render deployment resources, a Unity Catalog catalog,
+permission to create schemas/volumes and pipelines, serverless compute, and workspace support for table-update
+triggers on the Silver materialized views.
+The job run identity needs access to those Silver objects. Use your existing `medallion-poc` CLI profile.
 
-[`contract_loader.py`](src/pipelines/contract_loader.py) loads the contracts when the pipeline process
-initializes. The runtime derives the ordered payload fields, landing source identifiers, raw Spark schemas,
-and supported Lakeflow expectations from those YAML models. `pipeline_common.py` obtains the interface for
-the requested source object; Silver uses that same interface when capturing rejected raw payloads.
+This revision uses the new bundle identity **`medallion-architecture-poc-v2`**. The old deployment and its
+`medallion_poc_*` schemas remain untouched. Pause old scheduled jobs before moving to the new POC.
+Do not delete or transfer ownership of the old tables. Data is not migrated automatically: upload source
+files to the new volumes or use the sample-arrival demo. The new source pipelines have fresh checkpoints.
 
-There are no generated Python column lists or expectation artifacts. Bundle sync uploads the YAML files,
-and each serverless pipeline's `environment.dependencies` installs `open-data-contract-standard==3.2.0`.
-The bundle sets `poc.bundle_root: ${workspace.file_path}` in every pipeline. Source files use that absolute
-workspace path to import shared modules and locate the uploaded `contracts/` directory. Lakeflow may evaluate
-Python source without `__file__`, so path initialization relies on the configured root rather than file globals
-or the working directory. Redeploy the bundle after updating code so this configuration is supplied.
-
-After editing a contract, validate locally, deploy the bundle, and start the relevant pipeline:
+For the first deployment, generate resources without a table watcher. This avoids asking the Jobs API to
+watch Silver tables before they exist. Enable the trigger after setup:
 
 ```bash
-python scripts/validate_contracts.py
+git pull
+UV_CACHE_DIR=/tmp/medallion-uv-cache uv sync --locked
+.venv/bin/python scripts/generate_bundle_resources.py --bootstrap
+
+databricks bundle deploy --profile medallion-poc -t dev \
+  --var catalog=main --var gold_trigger_status=PAUSED
+
+databricks bundle run setup_poc --profile medallion-poc -t dev \
+  --var catalog=main
+
+.venv/bin/python scripts/generate_bundle_resources.py
+databricks bundle deploy --profile medallion-poc -t dev \
+  --var catalog=main --var gold_trigger_status=UNPAUSED
 ```
 
-CI validates the original YAML against the pinned official ODCS JSON schema and exercises the same library
-loader used by the pipelines. Tests demonstrate that editing YAML alone changes raw columns, landing routes,
-and required-field/enum expectations at initialization. A running pipeline uses the snapshot loaded into its
-process; YAML is not reread for every row. The library reads contract definitions, while Lakeflow expectations
-and Python transformations perform the data validation and cleaning. Arbitrary contract transformation text
-is not executed as code.
+`setup_poc` creates missing schemas/volumes/folders, initializes all three source pipelines, runs Gold once
+to bootstrap its interfaces, and publishes the Platinum views. It uses no full refresh and deletes no data.
+Existing files are processed incrementally. The bootstrap generation is temporary; normal generation restores
+the checked-in resources with the trigger, preserving the same job/pipeline IDs. The Gold trigger must be absent
+or paused while running setup to avoid concurrent bootstrap and triggered updates. The setup notebook alone only provisions storage;
+use the setup **job** for the complete initialization.
 
-Contract compatibility tests allow nullable additions and flag removals, type changes, newly required fields, and removed objects as breaking changes.
+The explicit resource `pause_status` is controlled by `gold_trigger_status`; the development target also
+allows unpaused triggers. Check **Gold on Silver changes → Schedules & Triggers** after deployment.
+Normal deployments default to UNPAUSED. Use `--var gold_trigger_status=PAUSED` when pausing for setup/maintenance.
+The setup does not require an API credential inside a notebook or notebook-driven changes to job schedules.
 
-The advertising demo also sends an undeclared `placement_type` field. Auto Loader retains it in Bronze `_rescued_data`, while the source contract and Silver interface remain stable.
+## Demonstrate separate arrivals
 
-## Silver derived-column example
+After setup and enabling the trigger, run:
 
-ERP sends a hierarchy such as:
+```bash
+databricks bundle run medallion_poc_demo --profile medallion-poc -t dev \
+  --var catalog=main
+```
+
+The demo stages ERP examples, runs `ingest_erp`, then **only observes** the Gold/Platinum results until
+`ERP_ONLY` appears. It repeats for CRM (`CRM_ENRICHED`) and Ads (`COMPLETE`). It never calls the Gold pipeline
+or `refresh_gold`. If the automatic trigger is paused or broken, the observation task fails after 15 minutes
+with a diagnostic rather than silently refreshing Gold itself. Startup and trigger delays can take minutes.
+
+The same `OL100` order ultimately has CHF 59.80 attributed revenue, CHF 20.00 ad spend and ROAS 2.99.
+This example uses a single currency; multi-currency reporting needs currency-aware grain/conversion rules. `P_BAD`
+is retained in Bronze and quarantined in Silver. Ads also supplies an undeclared `placement_type`, retained
+in Bronze `_rescued_data` while the Silver interface stays stable.
+
+Run the staged sequence against an initially empty POC catalog. The demo checks that Gold readiness reports no existing
+Silver records before beginning; it does not clear landing files, reset checkpoints or delete raw records.
+For another full demonstration use another catalog. Identical example files are content-addressed and
+never overwritten; ingestion retries do not append the same file again.
+
+Outside the demo, upload immutable new CSV files and run only the corresponding source job:
 
 ```text
-PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+/Volumes/main/bronze_erp/landing/erp_orders/<new-file>.csv
+/Volumes/main/bronze_crm/landing/crm_contacts/<new-file>.csv
+/Volumes/main/bronze_ads/landing/ads_campaigns/<new-file>.csv
 ```
 
-Silver retains it as `product_hierarchy_raw` and derives `product_family`, `product_tier`, `product_format`, and `product_orientation`. The ODCS contract records each field's source and transformation. Nulls, empty segments, and any segment count other than four are sent to `silver.erp_contract_quarantine` with a stable violation code. The demo intentionally includes `P_BAD` to prove this behavior.
+```bash
+databricks bundle run ingest_crm --profile medallion-poc -t dev --var catalog=main
+```
 
-## Local validation
+That job stops at Silver. Watch the independently triggered `refresh_gold` run, then query:
 
-Python 3.11 or newer and `uv` are recommended:
+```sql
+SELECT order_line_id, completeness_status FROM main.gold_common.fact_attributed_sales;
+SELECT * FROM main.platinum_sales.sales_detail;
+SELECT * FROM main.platinum_marketing.fact_campaign_performance;
+```
+
+After changing a Platinum contract, run `publish_platinum_views` once to replace its view definitions.
+Data changes in Gold require no view republication. After changing a Gold expression without a Silver data
+change, explicitly run `refresh_gold` once: table-update triggers monitor data commits, not YAML edits.
+
+## Edit and validate
+
+Python 3.11+ and Java 17+ are required for local Spark tests:
 
 ```bash
-UV_CACHE_DIR=/tmp/medallion-uv-cache uv sync --extra dev
+UV_CACHE_DIR=/tmp/medallion-uv-cache uv sync --locked --extra dev
 .venv/bin/python scripts/fetch_odcs_schema.py
 .venv/bin/python scripts/validate_contracts.py
+.venv/bin/python scripts/generate_bundle_resources.py
 .venv/bin/pytest
 .venv/bin/ruff check .
 ```
 
-These checks validate ODCS files, runtime contract loading, expectation derivation, compatibility behavior,
-layer dependencies, and delimiter edge cases. Spark execution requires Databricks because Lakeflow decorators
-and Auto Loader are runtime features.
+Runtime transformations read YAML directly. `generate_bundle_resources.py` only produces deployment
+resources: source pipeline/job definitions and the Gold trigger's watched tables. Commit its generated
+`resources/medallion_poc.yml` after changing contract names or dependencies. CI checks for drift. `--bootstrap` temporarily omits the watcher for first-time setup; restore normal
+generation before committing or enabling automatic refresh.
+When adding a source, also add its two small pipeline entrypoints following the existing source folders.
 
-## Deploy and run
-
-Authenticate the Databricks CLI to a Unity Catalog-enabled workspace, then choose a catalog where you can create schemas and a managed volume:
-
-```bash
-databricks bundle validate -t dev --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle deploy -t dev --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle run medallion_poc_demo -t dev --var="catalog=main,schema_prefix=medallion_poc"
-```
-
-The workflow creates the schemas and landing volume, stages each source independently, runs the relevant
-source pipeline, refreshes Gold and Platinum, publishes virtual Platinum dimension views, and fails
-immediately if any expected transition is missing.
-
-The initial source tasks use a full refresh so the demo is repeatable. Run this workflow only against a
-dedicated POC schema prefix: resetting the landing volume is part of the demonstration.
-
-### Setup notebook
-
-[`setup_poc.py`](src/notebooks/setup_poc.py) is a dedicated Databricks notebook. Open it under the deployed
-bundle's `src/notebooks` folder, set its `catalog`, `schema_prefix`, and `volume_name` widgets to the values
-used at deploy, and select **Run all**. It discovers the bundle root from the notebook context, or accepts an
-explicit `bundle_root` widget when opened elsewhere.
-
-The notebook creates missing layer/mart schemas, the managed landing volume, and the source directories
-declared by the ODCS YAML. It uses `IF NOT EXISTS`, preserves existing files and tables, and can be rerun.
-The `_platinum` schema is also created because it remains the Platinum pipeline's default namespace.
-
-For a fresh deployment, use the setup job to run the notebook and initialize all three Bronze/Silver source
-interfaces together, including empty sources:
-
-```bash
-databricks bundle run setup_poc --profile medallion-poc -t dev \
-  --var="catalog=main,schema_prefix=medallion_poc"
-```
-
-Initialization uses incremental pipeline updates. It creates table interfaces and processes any files already
-present without resetting checkpoints. The notebook itself creates storage only. Sample data comes from the
-staged demo. Gold needs all contracted Silver interfaces to exist, even if a source has not delivered rows yet.
-
-After the demo has initialized every contracted source interface, place new files in the appropriate landing
-directory and run only that source job:
-
-```bash
-databricks bundle run ingest_erp -t dev --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle run ingest_crm -t dev --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle run ingest_ads -t dev --var="catalog=main,schema_prefix=medallion_poc"
-```
-
-Each command first runs the setup notebook to prepare missing storage, finishes its own Bronze/Silver load,
-then runs Gold followed by Platinum. To use individual jobs without running the staged demo first, run
-`setup_poc` (or `initialize_source_interfaces`) once after deploy so all Silver input tables exist.
-You can also run `curated_refresh` directly when Silver data was changed by another process.
-
-Earlier versions of this POC used one pipeline with the target schema `medallion_poc_pipeline`. That schema
-was empty because every table name was fully qualified into its actual layer schema. The new bundle no longer
-uses that target. An already-created empty schema may remain after redeployment; the data tables are under
-`medallion_poc_bronze`, `_silver`, `_gold`, `_platinum_sales`, and `_platinum_marketing`.
-
-### Upgrading from the single Platinum schema
-
-Deploy the updated bundle with your existing catalog and prefix, then run `curated_refresh` to create the
-two marts using your current Gold data:
-
-```bash
-databricks bundle deploy -t dev --profile medallion-poc \
-  --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle run curated_refresh -t dev --profile medallion-poc \
-  --var="catalog=main,schema_prefix=medallion_poc"
-```
-
-This update keeps the existing pipeline resource identities. It requires no deletion of source pipelines and
-no full refresh of Bronze or Silver. Update consumer queries from `_platinum.sales_datamart` to
-`_platinum_sales.sales_detail`, and from `_platinum.marketing_performance` to
-`_platinum_marketing.fact_campaign_performance`. The old `_platinum` schema is retained as the pipeline's
-default namespace for existing deployments; all new consumer objects have fully qualified mart names.
-Legacy objects in that schema may remain and are no longer updated by the new definitions.
-
-### Upgrading from the earlier single-pipeline POC
-
-Unity Catalog tables managed by Lakeflow retain the ID of the pipeline that created them. Before the five
-new pipelines can use the same schema prefix, delete the legacy pipeline and its POC datasets once. Copy the
-legacy pipeline ID from the `TABLE_ALREADY_MANAGED_BY_OTHER_PIPELINE` error, then run:
-
-```bash
-databricks pipelines delete <legacy-pipeline-id> --cascade --profile medallion-poc
-databricks bundle deploy -t dev --profile medallion-poc \
-  --var="catalog=main,schema_prefix=medallion_poc"
-databricks bundle run medallion_poc_demo -t dev --profile medallion-poc \
-  --var="catalog=main,schema_prefix=medallion_poc"
-```
-
-The cascading delete removes every table owned by the legacy monolithic pipeline. The staged demo recreates
-the schemas, source data, and tables under their new pipeline owners. To retain the legacy POC tables, deploy
-with a new dedicated prefix such as `schema_prefix=medallion_poc_v2` instead.
-
-## Key outputs
-
-| Object | Grain | Purpose |
-|---|---|---|
-| `silver.erp_products` | Product | Typed product record with the split hierarchy |
-| `silver.erp_contract_quarantine` | Rejected ERP source record | Payload, source metadata, and violation codes |
-| `gold.fact_sales` | Order line | Stable sales fact |
-| `gold.fact_attributed_sales` | Order line | Late-arriving CRM and campaign enrichment status |
-| `gold.data_readiness` | Source object | Source timestamps, ingestion timestamps, and availability |
-| `platinum_sales.fact_sales` | Order line | Materialized sales fact with keys for the Sales mart dimensions |
-| `platinum_sales.sales_detail` | Order line | Flattened sales report within the Sales mart |
-| `platinum_sales.dim_customer`, `dim_product` | Dimension business key | Virtual Sales mart views over Gold dimensions |
-| `platinum_marketing.fact_campaign_performance` | Date and campaign | Spend, attributed revenue, incomplete revenue, and ROAS |
-| `platinum_marketing.dim_campaign` | Campaign | Virtual Marketing mart view over the Gold campaign dimension |
-
-Pipeline expectation metrics are available in the Lakeflow event log. Unity Catalog lineage shows Bronze-to-Silver, Silver-to-Gold, and Gold-to-Platinum dependencies.
+Local tests execute the actual Silver/Gold/Platinum SQL under Spark ANSI mode, including the three arrival
+stages, output types/grains, invalid values and a changed contract expression/output column. Registration
+tests simulate Lakeflow without `__file__`; setup and example-file tests check repeatability. These tests
+cannot prove Auto Loader behavior, native trigger delivery, permissions or Lakeflow incremental refresh
+plans: the staged Databricks job is the workspace acceptance test.

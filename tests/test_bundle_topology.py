@@ -1,89 +1,68 @@
-from pathlib import Path
+import runpy
+import subprocess
+import sys
 
-import yaml
-
-
-def _resources(repository_root: Path) -> dict:
-    path = repository_root / "resources/medallion_poc.yml"
-    return yaml.safe_load(path.read_text())["resources"]
+from medallion_poc.contracts import load_yaml
+from medallion_poc.execution import physical_name, settings
 
 
-def test_pipeline_per_source_and_curated_layer(repository_root):
-    pipelines = _resources(repository_root)["pipelines"]
-    assert set(pipelines) == {
+def test_source_jobs_end_at_silver_and_gold_has_table_change_trigger(repository_root, contracts):
+    resource = load_yaml(repository_root / "resources/medallion_poc.yml")["resources"]
+    assert set(resource["pipelines"]) == {
         "erp_source_pipeline",
         "crm_source_pipeline",
         "ads_source_pipeline",
         "gold_pipeline",
-        "platinum_pipeline",
     }
-    for system in ("erp", "crm", "ads"):
-        pipeline = pipelines[f"{system}_source_pipeline"]
-        assert pipeline["libraries"] == [{"glob": {"include": f"../src/pipelines/{system}/**"}}]
-    for layer in ("gold", "platinum"):
-        pipeline = pipelines[f"{layer}_pipeline"]
-        assert pipeline["libraries"] == [{"file": {"path": f"../src/pipelines/{layer}.py"}}]
-    assert all("poc.pipeline_scope" not in pipeline["configuration"] for pipeline in pipelines.values())
-
-
-def test_bundle_installs_odcs_library_and_uploads_yaml_for_runtime_loading(repository_root):
-    config = yaml.safe_load((repository_root / "databricks.yml").read_text())
-    assert "contracts/**/*.yaml" in config["sync"]["include"]
-    for pipeline in _resources(repository_root)["pipelines"].values():
-        assert "open-data-contract-standard==3.2.0" in pipeline["environment"]["dependencies"]
-        assert pipeline["configuration"]["poc.bundle_root"] == "${workspace.file_path}"
-
-
-def test_each_source_job_refreshes_curated_layers(repository_root):
-    jobs = _resources(repository_root)["jobs"]
     for source in ("erp", "crm", "ads"):
-        tasks = {task["task_key"]: task for task in jobs[f"ingest_{source}"]["tasks"]}
-        assert tasks["prepare_storage"]["notebook_task"]["notebook_path"] == "../src/notebooks/setup_poc.py"
-        assert tasks["prepare_storage"]["notebook_task"]["base_parameters"]["bundle_root"] == "${workspace.file_path}"
-        assert tasks[f"ingest_{source}"]["depends_on"] == [{"task_key": "prepare_storage"}]
-        assert tasks[f"ingest_{source}"]["pipeline_task"]["pipeline_id"] == (
-            f"${{resources.pipelines.{source}_source_pipeline.id}}"
+        job = resource["jobs"][f"ingest_{source}"]
+        assert len(job["tasks"]) == 1
+        assert (
+            job["tasks"][0]["pipeline_task"]["pipeline_id"]
+            == "${resources.pipelines." + source + "_source_pipeline.id}"
         )
-        assert tasks["refresh_curated_layers"]["depends_on"] == [{"task_key": f"ingest_{source}"}]
-        assert tasks["refresh_curated_layers"]["run_job_task"]["job_id"] == "${resources.jobs.curated_refresh.id}"
-
-    curated_tasks = {task["task_key"]: task for task in jobs["curated_refresh"]["tasks"]}
-    assert curated_tasks["refresh_gold"]["pipeline_task"]["pipeline_id"] == ("${resources.pipelines.gold_pipeline.id}")
-    assert curated_tasks["publish_dimension_views"]["depends_on"] == [{"task_key": "refresh_gold"}]
-    assert curated_tasks["refresh_platinum"]["depends_on"] == [{"task_key": "publish_dimension_views"}]
-    assert curated_tasks["refresh_platinum"]["pipeline_task"]["pipeline_id"] == (
-        "${resources.pipelines.platinum_pipeline.id}"
-    )
-
-
-def test_initialization_prepares_storage_and_keeps_source_loads_incremental(repository_root):
-    jobs = _resources(repository_root)["jobs"]
-    assert jobs["setup_poc"]["tasks"][0]["run_job_task"]["job_id"] == (
-        "${resources.jobs.initialize_source_interfaces.id}"
-    )
-    tasks = {
-        task["task_key"]: task for task in _resources(repository_root)["jobs"]["initialize_source_interfaces"]["tasks"]
+        assert resource["pipelines"][source + "_source_pipeline"]["schema"] == "bronze_" + source
+    gold = resource["jobs"]["refresh_gold"]
+    trigger = gold["trigger"]["table_update"]
+    expected = {
+        physical_name(contracts.objects[ref], "main")
+        for name, obj in contracts.objects.items()
+        if name.startswith("gold.")
+        for ref in settings(obj)["inputs"].values()
     }
-    assert tasks["prepare_storage"]["notebook_task"]["notebook_path"] == "../src/notebooks/setup_poc.py"
-    assert tasks["prepare_storage"]["notebook_task"]["base_parameters"]["bundle_root"] == "${workspace.file_path}"
-    for source in ("erp", "crm", "ads"):
-        task = tasks[f"initialize_{source}"]
-        assert task["depends_on"] == [{"task_key": "prepare_storage"}]
-        assert task["pipeline_task"]["pipeline_id"] == f"${{resources.pipelines.{source}_source_pipeline.id}}"
-        assert not task["pipeline_task"].get("full_refresh", False)
+    assert {name.replace("${var.catalog}", "main") for name in trigger["table_names"]} == expected
+    assert trigger["condition"] == "ANY_UPDATED"
+    assert trigger["wait_after_last_change_seconds"] >= 60
+    assert trigger["min_time_between_triggers_seconds"] >= 60
+    assert gold["max_concurrent_runs"] == 1
+    assert gold["queue"]["enabled"]
 
 
-def test_demo_refreshes_gold_and_platinum_after_each_arrival(repository_root):
-    tasks = _resources(repository_root)["jobs"]["medallion_poc_demo"]["tasks"]
-    by_key = {task["task_key"]: task for task in tasks}
-    for source in ("erp", "crm", "ads"):
-        gold = by_key[f"gold_after_{source}"]
-        platinum = by_key[f"platinum_after_{source}"]
-        if source != "erp":
-            assert gold["depends_on"] == [{"task_key": f"process_{source}"}]
-        if source == "erp":
-            assert by_key["publish_views"]["depends_on"] == [{"task_key": "gold_after_erp"}]
-            assert platinum["depends_on"] == [{"task_key": "publish_views"}]
-            assert by_key["assert_erp_only"]["depends_on"] == [{"task_key": "platinum_after_erp"}]
-        else:
-            assert platinum["depends_on"] == [{"task_key": f"gold_after_{source}"}]
+def test_demo_only_ingests_sources_and_observes_results(repository_root):
+    resource = load_yaml(repository_root / "resources/medallion_poc.yml")["resources"]
+    demo = resource["jobs"]["medallion_poc_demo"]
+    for task in demo["tasks"]:
+        assert "pipeline_task" not in task
+        if "run_job_task" in task:
+            assert "resources.jobs.ingest_" in task["run_job_task"]["job_id"]
+    assert "full_refresh" not in (repository_root / "resources/medallion_poc.yml").read_text()
+    setup = {task["task_key"]: task for task in resource["jobs"]["setup_poc"]["tasks"]}
+    assert {dep["task_key"] for dep in setup["initialize_gold"]["depends_on"]} == {
+        "initialize_erp",
+        "initialize_crm",
+        "initialize_ads",
+    }
+    assert setup["publish_views"]["depends_on"] == [{"task_key": "initialize_gold"}]
+
+
+def test_generated_bundle_has_no_contract_drift(repository_root):
+    subprocess.run([sys.executable, "scripts/generate_bundle_resources.py", "--check"], cwd=repository_root, check=True)
+
+
+def test_bootstrap_omits_watcher_without_changing_resource_identities(repository_root, contracts):
+    generate = runpy.run_path(str(repository_root / "scripts/generate_bundle_resources.py"))["resources"]
+    normal = generate(contracts)["resources"]
+    bootstrap = generate(contracts, bootstrap=True)["resources"]
+    assert "trigger" not in bootstrap["jobs"]["refresh_gold"]
+    normal["jobs"]["refresh_gold"].pop("trigger")
+    assert bootstrap == normal

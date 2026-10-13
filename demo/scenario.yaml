@@ -1,0 +1,30 @@
+# Observations for the demo, not production table definitions or transformation logic.
+stages:
+  erp:
+    source: erp
+    precondition:
+      query: SELECT coalesce(sum(record_count), 0) FROM {{ gold.data_readiness }}
+      equals: 0
+      message: Use a fresh POC catalog and run setup_poc first. This demo preserves existing history.
+    assertions:
+      - name: ERP order appears before CRM and Ads arrive
+        query: SELECT completeness_status FROM {{ gold.fact_attributed_sales }} WHERE order_line_id = 'OL100'
+        equals: ERP_ONLY
+      - name: Contract-defined hierarchy reaches the Sales view
+        query: SELECT product_family FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL100'
+        equals: PHOTOBOOK
+  crm:
+    source: crm
+    assertions:
+      - name: Existing order is enriched by the late CRM contact
+        query: SELECT completeness_status FROM {{ gold.fact_attributed_sales }} WHERE order_line_id = 'OL100'
+        equals: CRM_ENRICHED
+  ads:
+    source: ads
+    assertions:
+      - name: Existing order gains campaign attribution
+        query: SELECT completeness_status FROM {{ gold.fact_attributed_sales }} WHERE order_line_id = 'OL100'
+        equals: COMPLETE
+      - name: Marketing view reflects Gold without a Platinum refresh
+        query: SELECT return_on_ad_spend FROM {{ platinum.fact_campaign_performance }} WHERE campaign_code = 'META_FALL_2026'
+        equals: 2.99

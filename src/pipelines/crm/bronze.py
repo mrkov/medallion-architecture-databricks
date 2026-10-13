@@ -1,5 +1,7 @@
-"""Append-only CRM Bronze streaming tables."""
+"""Register datasets from deployed ODCS contracts."""
 # ruff: noqa: E402
+
+from __future__ import annotations
 
 # Lakeflow can evaluate source without __file__. The bundle supplies the deployed root.
 import sys
@@ -18,16 +20,6 @@ for directory in ("src", "src/pipelines"):
     if import_path not in sys.path:
         sys.path.insert(0, import_path)
 
-from contract_loader import SOURCE_EXPECTATIONS
-from pipeline_common import read_landing, table_name
-from pyspark import pipelines as dp
+from pipeline_common import register_bronze
 
-
-@dp.table(
-    name=table_name("bronze", "crm_contacts"),
-    comment="Exact CRM contact payload as strings plus ingestion metadata.",
-    table_properties={"layer": "bronze", "source_system": "crm"},
-)
-@dp.expect_all(SOURCE_EXPECTATIONS["crm_contacts"])
-def bronze_crm_contacts():
-    return read_landing("crm_contacts")
+register_bronze("crm")

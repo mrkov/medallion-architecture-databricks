@@ -1,29 +1,39 @@
-"""Shared names, source schemas, and helpers for the Lakeflow pipeline."""
+"""Generic Lakeflow registration and append-only ingestion of contracted source interfaces."""
 
-from __future__ import annotations
+from functools import reduce
 
-from contract_loader import source_definition
-from pyspark.sql import DataFrame, SparkSession, Window
+from contract_loader import CONTRACTS, source_definition
+from pyspark import pipelines as dp
+from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
+from medallion_poc.execution import (
+    accepted_silver,
+    evaluate_silver,
+    keys,
+    physical_name,
+    quote,
+    render_query,
+    resolve,
+    rules,
+)
+
 spark = SparkSession.getActiveSession()
-if spark is None:
-    raise RuntimeError("An active Spark session is required")
-
 CATALOG = spark.conf.get("poc.catalog")
-SCHEMA_PREFIX = spark.conf.get("poc.schema_prefix")
 VOLUME_NAME = spark.conf.get("poc.volume_name")
-LANDING_ROOT = f"/Volumes/{CATALOG}/{SCHEMA_PREFIX}_landing/{VOLUME_NAME}"
 
 
-def table_name(layer: str, name: str) -> str:
-    return f"{CATALOG}.{SCHEMA_PREFIX}_{layer}.{name}"
+def name_of(reference):
+    return physical_name(resolve(CONTRACTS, reference), CATALOG)
 
 
-def read_landing(object_name: str) -> DataFrame:
+def sql_name(reference):
+    return quote(name_of(reference))
+
+
+def read_landing(object_name):
     source = source_definition(object_name)
-    columns = source.columns
-    source_system = source.source_system
+    schema = name_of(f"bronze.{object_name}").split(".")[1]
     return (
         spark.readStream.format("cloudFiles")
         .option("cloudFiles.format", "csv")
@@ -32,31 +42,78 @@ def read_landing(object_name: str) -> DataFrame:
         .option("header", "true")
         .option("mode", "PERMISSIVE")
         .schema(source.spark_schema)
-        .load(f"{LANDING_ROOT}/{source_system}/{object_name}")
+        .load(f"/Volumes/{CATALOG}/{schema}/{VOLUME_NAME}/{object_name}")
         .select(
-            *(F.col(column).cast("string").alias(column) for column in columns),
+            *(F.col(column).cast("string").alias(column) for column in source.columns),
             F.col("_rescued_data").cast("string").alias("_rescued_data"),
             F.col("_metadata.file_path").cast("string").alias("_source_file"),
         )
         .withColumn("_ingested_at", F.current_timestamp())
-        .withColumn("_source_system", F.lit(source_system))
-        .withColumn(
-            "_batch_id",
-            F.regexp_extract(F.col("_source_file"), r"([^/]+)\.csv$", 1),
-        )
+        .withColumn("_source_system", F.lit(source.source_system))
+        .withColumn("_batch_id", F.regexp_extract(F.col("_source_file"), r"([^/]+)\.csv$", 1))
     )
 
 
-def latest_record(df: DataFrame, keys: list[str], sequence_column: str = "updated_at") -> DataFrame:
-    window = Window.partitionBy(*keys).orderBy(
-        F.col(sequence_column).desc_nulls_last(),
-        F.col("_ingested_at").desc(),
-        F.col("_source_file").desc(),
-    )
-    return (
-        df.withColumn("_row_number", F.row_number().over(window)).filter(F.col("_row_number") == 1).drop("_row_number")
-    )
+def register_bronze(system):
+    for source in CONTRACTS.sources.values():
+        if source.source_system != system:
+            continue
+
+        def dataset(object_name=source.object_name):
+            return read_landing(object_name)
+
+        dataset = dp.expect_all(CONTRACTS.expectations["source"][source.object_name])(dataset)
+        dp.table(
+            name=name_of(f"bronze.{source.object_name}"),
+            table_properties={"layer": "bronze", "delta.appendOnly": "true"},
+        )(dataset)
 
 
-def deterministic_key(namespace: str, column: str):
-    return F.sha2(F.concat_ws("|", F.lit(namespace), F.col(column)), 256)
+def register_silver(system):
+    objects = [
+        CONTRACTS.objects[f"silver.{s.object_name}"] for s in CONTRACTS.sources.values() if s.source_system == system
+    ]
+    for obj in objects:
+
+        def dataset(definition=obj):
+            return accepted_silver(evaluate_silver(spark, definition, sql_name), definition)
+
+        dataset = dp.expect_all_or_fail(rules(obj))(dataset)
+        dp.materialized_view(name=physical_name(obj, CATALOG), table_properties={"layer": "silver"})(dataset)
+
+    def quarantine():
+        frames = []
+        for obj in objects:
+            invalid = evaluate_silver(spark, obj, sql_name).filter(F.size("_contract_violations") > 0)
+            frames.append(
+                invalid.select(
+                    F.lit(obj["name"]).alias("source_object"),
+                    F.to_json(F.struct(*[F.col(key) for key in keys(obj)])).alias("business_key"),
+                    F.col("_raw_payload").alias("raw_payload"),
+                    F.col("_contract_violations").alias("violation_codes"),
+                    "_ingested_at",
+                    "_source_file",
+                    "_batch_id",
+                )
+            )
+        return reduce(lambda left, right: left.unionByName(right), frames)
+
+    schema = physical_name(objects[0], CATALOG).rsplit(".", 1)[0]
+    dp.materialized_view(
+        name=f"{schema}.contract_quarantine", table_properties={"layer": "silver", "quality": "quarantine"}
+    )(quarantine)
+
+
+def register_gold():
+    for reference, obj in CONTRACTS.objects.items():
+        if not reference.startswith("gold."):
+            continue
+
+        def dataset(definition=obj):
+            return spark.sql(render_query(definition, sql_name))
+
+        dataset = dp.expect_all_or_fail(rules(obj))(dataset)
+        dp.materialized_view(
+            name=physical_name(obj, CATALOG),
+            table_properties={"layer": "gold", "contract_version": obj["contract_version"]},
+        )(dataset)

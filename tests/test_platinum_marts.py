@@ -1,92 +1,95 @@
-import ast
-import re
-import runpy
+"""Run the real contract SQL through three source arrivals using local Spark."""
+
+from datetime import datetime
+from decimal import Decimal
 from types import SimpleNamespace
 
-from medallion_poc.contracts import compile_object, load_yaml
+from medallion_poc.execution import accepted_silver, evaluate_silver, keys, physical_name, render_query, rules, settings
+from medallion_poc.workspace import publish_views
 
 
-def _mart_contracts(repository_root):
-    return [load_yaml(path) for path in sorted(repository_root.glob("contracts/platinum/*.odcs.yaml"))]
+def local_name(reference):
+    return reference.replace(".", "_")
 
 
-def test_materialized_outputs_match_mart_contract_interfaces(repository_root):
-    source = ast.parse((repository_root / "src/pipelines/platinum.py").read_text())
-    outputs = {
-        f"<catalog>.<schema_prefix>_{call.args[0].value}.{call.args[1].value}"
-        for call in ast.walk(source)
-        if isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Name)
-        and call.func.id == "table_name"
-        and call.args[0].value.startswith("platinum_")
+def assert_interface(frame, obj):
+    assert frame.columns == [p["name"] for p in obj["properties"]]
+    rows = frame.collect()
+    assert len({tuple(row[key] for key in keys(obj)) for row in rows}) == len(rows)
+    condition = " AND ".join(f"coalesce(({expression}), false)" for expression in rules(obj).values())
+    assert frame.filter(f"NOT ({condition})").count() == 0
+    expected_types = {
+        "string": "string",
+        "boolean": "boolean",
+        "date": "date",
+        "timestamp": "timestamp",
+        "int": "int",
+        "bigint": "bigint",
     }
-    contracted_outputs = {
-        element["physicalName"]
-        for contract in _mart_contracts(repository_root)
-        for element in contract["schema"]
-        if element["physicalType"] == "materialized view"
-    }
-    assert outputs == contracted_outputs
-    assert len(outputs) == 3
+    for field, prop in zip(frame.schema, obj["properties"], strict=True):
+        declared = prop["physicalType"].lower()
+        assert field.dataType.simpleString() == expected_types.get(declared, declared)
 
 
-def test_virtual_dimensions_and_sales_fact_preserve_gold_interfaces(repository_root):
-    gold = load_yaml(repository_root / "contracts/gold/commerce_model.odcs.yaml")
-    for contract in _mart_contracts(repository_root):
-        for element in contract["schema"]:
-            if element["physicalType"] != "view" and element["name"] != "fact_sales":
-                continue
-            mart_interface = compile_object(contract, element["name"])
-            gold_interface = compile_object(gold, element["name"])
-            assert mart_interface.columns == gold_interface.columns
-            assert mart_interface.primary_key == gold_interface.primary_key
-            assert mart_interface.expectations == gold_interface.expectations
-            assert [prop["logicalType"] for prop in element["properties"]] == [
-                prop["logicalType"]
-                for prop in next(obj for obj in gold["schema"] if obj["name"] == element["name"])["properties"]
-            ]
-
-
-def test_view_publication_matches_contracts_and_reads_gold(repository_root):
-    queries = []
-    parameters = {
-        "action": "publish_views",
-        "catalog": "main",
-        "schema_prefix": "medallion_poc",
-        "volume_name": "landing",
-    }
-    dbutils = SimpleNamespace(widgets=SimpleNamespace(text=lambda *args: None, get=parameters.__getitem__))
-    runpy.run_path(
-        str(repository_root / "src/notebooks/demo_control.py"),
-        init_globals={"dbutils": dbutils, "spark": SimpleNamespace(sql=queries.append)},
-    )
-    created_schemas = {
-        match.group(1)
-        for query in queries
-        if (match := re.fullmatch(r"CREATE SCHEMA IF NOT EXISTS `main`\.`([^`]+)`", query))
-    }
-    assert created_schemas == {"medallion_poc_platinum_sales", "medallion_poc_platinum_marketing"}
-
-    views = {
-        (match.group(1), match.group(2), match.group(3))
-        for query in queries
-        if (
-            match := re.fullmatch(
-                r"CREATE OR REPLACE VIEW `main`\.`([^`]+)`\.`([^`]+)` AS "
-                r"SELECT \* FROM `main`\.`medallion_poc_gold`\.`([^`]+)`",
-                query,
+def test_late_arrivals_converge_and_every_mart_is_a_gold_view(spark, contracts):
+    loaded = set()
+    for stage, expected in [("erp", "ERP_ONLY"), ("crm", "CRM_ENRICHED"), ("ads", "COMPLETE")]:
+        loaded.add(stage)
+        for source in contracts.sources.values():
+            obj = contracts.objects["source." + source.object_name]
+            examples = settings(obj)["demo_rows"] if source.source_system in loaded else []
+            metadata = (datetime(2026, 10, 1), "fixture.csv", source.source_system, "fixture")
+            data = [tuple(row.get(c) for c in source.columns) + metadata for row in examples]
+            schema = (
+                source.spark_schema
+                + ", _ingested_at TIMESTAMP, _source_file STRING, _source_system STRING, _batch_id STRING"
             )
+            spark.createDataFrame(data, schema).createOrReplaceTempView("bronze_" + source.object_name)
+            silver = contracts.objects["silver." + source.object_name]
+            result = accepted_silver(evaluate_silver(spark, silver, local_name), silver)
+            # Materialize the local substitute for a persisted Silver output.
+            result = spark.createDataFrame(result.collect(), result.schema)
+            result.createOrReplaceTempView("silver_" + source.object_name)
+        for reference, obj in contracts.objects.items():
+            if not reference.startswith("gold."):
+                continue
+            result = spark.sql(render_query(obj, local_name))
+            result = spark.createDataFrame(result.collect(), result.schema)
+            result.createOrReplaceTempView(local_name(reference))
+            if stage == "ads":
+                assert_interface(result, obj)
+        row = spark.table("gold_fact_attributed_sales").first()
+        assert row.order_line_id == "OL100"
+        assert row.completeness_status == expected
+        for reference, obj in contracts.objects.items():
+            if not reference.startswith("platinum."):
+                continue
+            assert obj["physicalType"] == "view"
+            spark.sql(f"CREATE OR REPLACE TEMP VIEW {local_name(reference)} AS {render_query(obj, local_name)}")
+            if stage == "ads":
+                assert_interface(spark.table(local_name(reference)), obj)
+        sales = spark.table("platinum_sales_detail").first()
+        assert (sales.product_family, sales.product_tier, sales.line_amount) == (
+            "PHOTOBOOK",
+            "PREMIUM",
+            Decimal("59.80"),
         )
-    }
-    expected = {
-        (
-            element["physicalName"].split(".")[1].replace("<schema_prefix>", "medallion_poc"),
-            element["name"],
-            element["name"],
-        )
-        for contract in _mart_contracts(repository_root)
-        for element in contract["schema"]
-        if element["physicalType"] == "view"
-    }
-    assert views == expected
-    assert len(views) == 3
+    performance = spark.table("platinum_fact_campaign_performance").first()
+    assert performance.attributed_revenue == Decimal("59.80")
+    assert performance.incomplete_revenue == Decimal("0")
+    assert performance.spend_amount == Decimal("20.00")
+    assert performance.return_on_ad_spend == Decimal("2.9900")
+    assert spark.table("gold_dim_product").count() == 1
+    assert spark.table("bronze_erp_products").count() == 2
+
+
+def test_publisher_creates_every_mart_as_an_ordinary_view(contracts):
+    statements = []
+    publish_views(SimpleNamespace(sql=statements.append), contracts, "main")
+    expected = [obj for ref, obj in contracts.objects.items() if ref.startswith("platinum.")]
+    assert len(statements) == len(expected) == 6
+    for query, obj in zip(statements, expected, strict=True):
+        assert query.startswith("CREATE OR REPLACE VIEW ")
+        assert physical_name(obj, "main").replace(".", "`.`") in query
+        assert "`main`.`gold_common`." in query
+        assert "SELECT *" not in query

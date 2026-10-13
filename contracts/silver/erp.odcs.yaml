@@ -1,0 +1,375 @@
+apiVersion: v3.2.0
+kind: DataContract
+id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d-silver
+name: silver_erp
+version: 2.0.0
+status: active
+domain: commerce
+customProperties:
+- property: source_system
+  value: erp
+description:
+  purpose: Raw ERP interfaces for customers, products, orders, and order lines.
+  usage: Append-only ingestion into the Bronze ERP schema.
+  limitations: Every source field is represented as a string at the Bronze boundary.
+team:
+  name: commerce-data
+  members:
+  - username: commerce-owner
+    role: Data Product Owner
+schema:
+- name: erp_customers
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per ERP customer version.
+  properties:
+  - name: customer_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: customer_number
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.customer_number
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: country_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.country_code
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: created_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.created_at
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.erp_customers
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_erp.erp_customers
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.erp_customers
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks: {}
+- name: erp_products
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per ERP product version.
+  properties:
+  - name: product_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.product_id
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_name
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_hierarchy_raw
+    logicalType: string
+    required: true
+    description: Pipe-delimited family, tier, format, and orientation.
+    examples:
+    - PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+    logicalTypeOptions:
+      pattern: ^[^|]+\|[^|]+\|[^|]+\|[^|]+$
+    physicalType: STRING
+    transformLogic: src.product_hierarchy
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_family
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: trim(try_element_at(split(src.product_hierarchy, '[|]', -1), 1))
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_tier
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: trim(try_element_at(split(src.product_hierarchy, '[|]', -1), 2))
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_format
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: trim(try_element_at(split(src.product_hierarchy, '[|]', -1), 3))
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: product_orientation
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: trim(try_element_at(split(src.product_hierarchy, '[|]', -1), 4))
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: active
+    logicalType: boolean
+    required: true
+    physicalType: BOOLEAN
+    transformLogic: CASE WHEN lower(trim(src.active_flag)) IN ('1','true','y','yes') THEN true WHEN lower(trim(src.active_flag))
+      IN ('0','false','n','no') THEN false END
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.erp_products
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_erp.erp_products
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.erp_products
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks:
+        HIERARCHY_SEGMENT_COUNT: size(split(product_hierarchy_raw, '[|]', -1)) = 4
+        HIERARCHY_EMPTY_SEGMENT: NOT exists(split(product_hierarchy_raw, '[|]', -1), part -> length(trim(part)) = 0)
+- name: erp_orders
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per ERP order version.
+  properties:
+  - name: order_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.order_id
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: customer_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: order_timestamp
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.order_timestamp
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: order_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.order_status
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: currency_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.currency_code
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: campaign_code
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.erp_orders
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_erp.erp_orders
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.erp_orders
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks: {}
+- name: erp_order_lines
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One source record per ERP order-line version.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.order_line_id
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.order_id
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: product_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_id
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: quantity
+    logicalType: integer
+    required: true
+    physicalType: INT
+    transformLogic: src.quantity
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: unit_price
+    logicalType: number
+    required: true
+    physicalType: DECIMAL(18,2)
+    transformLogic: src.unit_price
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: updated_at
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: src.updated_at
+    transformSourceObjects:
+    - bronze.erp_order_lines
+  - name: _ingested_at
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: src._ingested_at
+  - name: _source_file
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_file
+  - name: _source_system
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._source_system
+  - name: _batch_id
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: src._batch_id
+  physicalName: <catalog>.silver_erp.erp_order_lines
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        raw: bronze.erp_order_lines
+      from_sql: '{{ raw }} AS src'
+      order_by:
+      - updated_at DESC NULLS LAST
+      - _ingested_at DESC
+      - _source_file DESC
+      row_checks:
+        quantity_valid: quantity > 0
+        unit_price_valid: unit_price >= 0

@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 94da63f7-f9fc-4595-8823-aa27ccb16fe9
 name: gold_commerce_model
-version: 1.0.0
+version: 2.0.0
 status: active
 domain: commerce
 description:
@@ -12,116 +12,656 @@ description:
 team:
   name: analytics-engineering
   members:
-    - username: analytics-owner
-      role: Data Product Owner
+  - username: analytics-owner
+    role: Data Product Owner
 slaProperties:
-  - property: frequency
-    value: 5
-    unit: minutes
-  - property: latency
-    value: 15
-    unit: minutes
+- property: frequency
+  value: 5
+  unit: minutes
+- property: latency
+  value: 15
+  unit: minutes
 schema:
-  - name: dim_customer
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One current row per ERP customer_id.
-    properties:
-      - {name: customer_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: customer_id, logicalType: string, required: true, unique: true}
-      - {name: customer_number, logicalType: string, required: true}
-      - {name: country_code, logicalType: string, required: true}
-      - {name: crm_contact_id, logicalType: string, required: false}
-      - {name: email, logicalType: string, required: false, classification: confidential}
-      - {name: marketing_consent, logicalType: boolean, required: false}
-      - {name: acquisition_channel, logicalType: string, required: false}
-      - name: enrichment_status
-        logicalType: string
-        required: true
-        enum:
-          - {value: ERP_ONLY}
-          - {value: CRM_ENRICHED}
-  - name: dim_product
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One current row per ERP product_id.
-    properties:
-      - {name: product_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: product_id, logicalType: string, required: true, unique: true}
-      - {name: product_name, logicalType: string, required: true}
-      - {name: product_family, logicalType: string, required: true}
-      - {name: product_tier, logicalType: string, required: true}
-      - {name: product_format, logicalType: string, required: true}
-      - {name: product_orientation, logicalType: string, required: true}
-      - {name: active, logicalType: boolean, required: true}
-  - name: dim_campaign
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One current row per campaign_code.
-    properties:
-      - {name: campaign_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_code, logicalType: string, required: true, unique: true}
-      - {name: campaign_name, logicalType: string, required: true}
-      - {name: platform, logicalType: string, required: true}
-  - name: fact_sales
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One row per ERP order_line_id.
-    properties:
-      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: order_id, logicalType: string, required: true}
-      - {name: order_timestamp, logicalType: timestamp, required: true}
-      - {name: order_date, logicalType: date, required: true}
-      - {name: customer_key, logicalType: string, required: true}
-      - {name: product_key, logicalType: string, required: true}
-      - {name: campaign_code, logicalType: string, required: false}
-      - {name: quantity, logicalType: integer, required: true}
-      - {name: unit_price, logicalType: number, required: true}
-      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
-      - {name: currency_code, logicalType: string, required: true}
-      - {name: order_status, logicalType: string, required: true}
-  - name: fact_attributed_sales
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One attribution row per ERP order_line_id.
-    properties:
-      - {name: order_line_id, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: order_id, logicalType: string, required: true}
-      - {name: order_date, logicalType: date, required: true}
-      - {name: customer_key, logicalType: string, required: true}
-      - {name: campaign_key, logicalType: string, required: false}
-      - {name: campaign_code, logicalType: string, required: false}
-      - {name: acquisition_channel, logicalType: string, required: false}
-      - {name: line_amount, logicalType: number, required: true, semanticType: measure}
-      - name: completeness_status
-        logicalType: string
-        required: true
-        enum:
-          - {value: ERP_ONLY}
-          - {value: CRM_ENRICHED}
-          - {value: COMPLETE}
-      - {name: crm_match_status, logicalType: string, required: true}
-      - {name: campaign_match_status, logicalType: string, required: true}
-      - {name: latest_source_timestamp, logicalType: timestamp, required: true}
-  - name: fact_ad_spend_daily
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One row per spend_date and campaign_code.
-    properties:
-      - {name: spend_date, logicalType: date, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
-      - {name: campaign_key, logicalType: string, required: true}
-      - {name: spend_amount, logicalType: number, required: true, semanticType: measure}
-      - {name: clicks, logicalType: integer, required: true, semanticType: measure}
-      - {name: impressions, logicalType: integer, required: true, semanticType: measure}
-  - name: data_readiness
-    physicalType: table
-    logicalType: object
-    dataGranularityDescription: One row per source object.
-    properties:
-      - {name: source_object, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: latest_source_timestamp, logicalType: timestamp, required: false}
-      - {name: latest_ingestion_timestamp, logicalType: timestamp, required: false}
-      - {name: record_count, logicalType: integer, required: true}
-      - {name: readiness_status, logicalType: string, required: true}
-
+- name: dim_customer
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One current row per ERP customer_id.
+  properties:
+  - name: customer_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'customer', customer.customer_id), 256)
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: customer_id
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: customer.customer_id
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: customer_number
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: customer.customer_number
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: country_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: customer.country_code
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: crm_contact_id
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: crm.contact_id
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: email
+    logicalType: string
+    required: false
+    classification: confidential
+    physicalType: STRING
+    transformLogic: crm.email
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: marketing_consent
+    logicalType: boolean
+    required: false
+    physicalType: BOOLEAN
+    transformLogic: crm.marketing_consent
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: acquisition_channel
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: crm.acquisition_channel
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  - name: enrichment_status
+    logicalType: string
+    required: true
+    enum:
+    - value: ERP_ONLY
+    - value: CRM_ENRICHED
+    physicalType: STRING
+    transformLogic: CASE WHEN crm.contact_id IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.crm_contacts
+  physicalName: <catalog>.gold_common.dim_customer
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        customer: silver.erp_customers
+        crm: silver.crm_contacts
+      from_sql: '{{ customer }} AS customer LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY erp_customer_id
+        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm
+        }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id'
+- name: dim_product
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One current row per ERP product_id.
+  properties:
+  - name: product_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'product', src.product_id), 256)
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_id
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: src.product_id
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_name
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_family
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_family
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_tier
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_tier
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_format
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_format
+    transformSourceObjects:
+    - silver.erp_products
+  - name: product_orientation
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.product_orientation
+    transformSourceObjects:
+    - silver.erp_products
+  - name: active
+    logicalType: boolean
+    required: true
+    physicalType: BOOLEAN
+    transformLogic: src.active
+    transformSourceObjects:
+    - silver.erp_products
+  physicalName: <catalog>.gold_common.dim_product
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: silver.erp_products
+      from_sql: '{{ src }} AS src'
+- name: dim_campaign
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One current row per campaign_code.
+  properties:
+  - name: campaign_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'campaign', src.campaign_code), 256)
+    transformSourceObjects:
+    - silver.ads_campaigns
+  - name: campaign_code
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - silver.ads_campaigns
+  - name: campaign_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.campaign_name
+    transformSourceObjects:
+    - silver.ads_campaigns
+  - name: platform
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.platform
+    transformSourceObjects:
+    - silver.ads_campaigns
+  physicalName: <catalog>.gold_common.dim_campaign
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: silver.ads_campaigns
+      from_sql: '{{ src }} AS src'
+- name: fact_sales
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One row per ERP order_line_id.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: line.order_line_id
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: ord.order_id
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: order_timestamp
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: ord.order_timestamp
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: order_date
+    logicalType: date
+    required: true
+    physicalType: DATE
+    transformLogic: to_date(ord.order_timestamp)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: customer_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'customer', ord.customer_id), 256)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: product_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'product', line.product_id), 256)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: campaign_code
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: ord.campaign_code
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: quantity
+    logicalType: integer
+    required: true
+    physicalType: INT
+    transformLogic: line.quantity
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: unit_price
+    logicalType: number
+    required: true
+    physicalType: DECIMAL(18,2)
+    transformLogic: line.unit_price
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: line_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: line.quantity * line.unit_price
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: currency_code
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: ord.currency_code
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  - name: order_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: ord.order_status
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+  physicalName: <catalog>.gold_common.fact_sales
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        line: silver.erp_order_lines
+        ord: silver.erp_orders
+      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id'
+- name: fact_attributed_sales
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One attribution row per ERP order_line_id.
+  properties:
+  - name: order_line_id
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: line.order_line_id
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: order_id
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: ord.order_id
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: order_date
+    logicalType: date
+    required: true
+    physicalType: DATE
+    transformLogic: to_date(ord.order_timestamp)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: customer_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'customer', ord.customer_id), 256)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: campaign_key
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: CASE WHEN campaign.campaign_code IS NOT NULL THEN sha2(concat_ws('|', 'campaign', campaign.campaign_code),
+      256) END
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: campaign_code
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: ord.campaign_code
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: acquisition_channel
+    logicalType: string
+    required: false
+    physicalType: STRING
+    transformLogic: crm.acquisition_channel
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: line_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: line.quantity * line.unit_price
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: completeness_status
+    logicalType: string
+    required: true
+    enum:
+    - value: ERP_ONLY
+    - value: CRM_ENRICHED
+    - value: COMPLETE
+    physicalType: STRING
+    transformLogic: CASE WHEN crm.contact_id IS NOT NULL AND campaign.campaign_code IS NOT NULL THEN 'COMPLETE' WHEN
+      crm.contact_id IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: crm_match_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: CASE WHEN crm.contact_id IS NOT NULL THEN 'MATCHED' ELSE 'MISSING' END
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: campaign_match_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: CASE WHEN ord.campaign_code IS NULL THEN 'NOT_PROVIDED' WHEN campaign.campaign_code IS NOT NULL THEN
+      'MATCHED' ELSE 'MISSING' END
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  - name: latest_source_timestamp
+    logicalType: timestamp
+    required: true
+    physicalType: TIMESTAMP
+    transformLogic: greatest(line.updated_at, ord.updated_at, customer.updated_at, crm.updated_at, campaign.updated_at)
+    transformSourceObjects:
+    - silver.erp_order_lines
+    - silver.erp_orders
+    - silver.erp_customers
+    - silver.crm_contacts
+    - silver.ads_campaigns
+  physicalName: <catalog>.gold_common.fact_attributed_sales
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        line: silver.erp_order_lines
+        ord: silver.erp_orders
+        customer: silver.erp_customers
+        crm: silver.crm_contacts
+        campaign: silver.ads_campaigns
+      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id JOIN {{ customer }} AS customer
+        ON ord.customer_id = customer.customer_id LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY
+        erp_customer_id ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank
+        FROM {{ crm }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id LEFT JOIN {{ campaign
+        }} AS campaign ON ord.campaign_code = campaign.campaign_code'
+- name: fact_ad_spend_daily
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One row per spend_date and campaign_code.
+  properties:
+  - name: spend_date
+    logicalType: date
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: DATE
+    transformLogic: src.spend_date
+    transformSourceObjects:
+    - silver.ads_spend
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 2
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - silver.ads_spend
+  - name: campaign_key
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: sha2(concat_ws('|', 'campaign', src.campaign_code), 256)
+    transformSourceObjects:
+    - silver.ads_spend
+  - name: spend_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: src.spend_amount
+    transformSourceObjects:
+    - silver.ads_spend
+  - name: clicks
+    logicalType: integer
+    required: true
+    semanticType: measure
+    physicalType: BIGINT
+    transformLogic: src.clicks
+    transformSourceObjects:
+    - silver.ads_spend
+  - name: impressions
+    logicalType: integer
+    required: true
+    semanticType: measure
+    physicalType: BIGINT
+    transformLogic: src.impressions
+    transformSourceObjects:
+    - silver.ads_spend
+  physicalName: <catalog>.gold_common.fact_ad_spend_daily
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: silver.ads_spend
+      from_sql: '{{ src }} AS src'
+- name: data_readiness
+  physicalType: materialized view
+  logicalType: object
+  dataGranularityDescription: One row per source object.
+  properties:
+  - name: source_object
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: readiness.source_object
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.erp_products
+    - silver.erp_orders
+    - silver.erp_order_lines
+    - silver.crm_contacts
+    - silver.ads_campaigns
+    - silver.ads_spend
+  - name: latest_source_timestamp
+    logicalType: timestamp
+    required: false
+    physicalType: TIMESTAMP
+    transformLogic: readiness.latest_source_timestamp
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.erp_products
+    - silver.erp_orders
+    - silver.erp_order_lines
+    - silver.crm_contacts
+    - silver.ads_campaigns
+    - silver.ads_spend
+  - name: latest_ingestion_timestamp
+    logicalType: timestamp
+    required: false
+    physicalType: TIMESTAMP
+    transformLogic: readiness.latest_ingestion_timestamp
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.erp_products
+    - silver.erp_orders
+    - silver.erp_order_lines
+    - silver.crm_contacts
+    - silver.ads_campaigns
+    - silver.ads_spend
+  - name: record_count
+    logicalType: integer
+    required: true
+    physicalType: BIGINT
+    transformLogic: readiness.record_count
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.erp_products
+    - silver.erp_orders
+    - silver.erp_order_lines
+    - silver.crm_contacts
+    - silver.ads_campaigns
+    - silver.ads_spend
+  - name: readiness_status
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: readiness.readiness_status
+    transformSourceObjects:
+    - silver.erp_customers
+    - silver.erp_products
+    - silver.erp_orders
+    - silver.erp_order_lines
+    - silver.crm_contacts
+    - silver.ads_campaigns
+    - silver.ads_spend
+  physicalName: <catalog>.gold_common.data_readiness
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        erp_customers: silver.erp_customers
+        erp_products: silver.erp_products
+        erp_orders: silver.erp_orders
+        erp_order_lines: silver.erp_order_lines
+        crm_contacts: silver.crm_contacts
+        ads_campaigns: silver.ads_campaigns
+        ads_spend: silver.ads_spend
+      from_sql: |-
+        (
+        SELECT 'erp_customers' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_customers }}
+        UNION ALL
+        SELECT 'erp_products' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_products }}
+        UNION ALL
+        SELECT 'erp_orders' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_orders }}
+        UNION ALL
+        SELECT 'erp_order_lines' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_order_lines }}
+        UNION ALL
+        SELECT 'crm_contacts' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ crm_contacts }}
+        UNION ALL
+        SELECT 'ads_campaigns' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ ads_campaigns }}
+        UNION ALL
+        SELECT 'ads_spend' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ ads_spend }}
+        ) AS readiness

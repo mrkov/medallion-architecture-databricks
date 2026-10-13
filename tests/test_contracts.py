@@ -26,7 +26,7 @@ def contract_paths(root: Path) -> list[Path]:
 
 def test_all_contracts_conform_to_official_odcs_schema(repository_root, odcs_schema):
     paths = contract_paths(repository_root)
-    assert len(paths) == 7
+    assert len(paths) == 9
     for path in paths:
         contract = validate_contract(path, odcs_schema)
         assert contract["apiVersion"] == "v3.2.0"
@@ -41,8 +41,8 @@ def test_bronze_source_contracts_define_all_payload_fields_as_strings(repository
 
 
 def test_silver_product_contract_documents_derived_columns(repository_root):
-    contract = load_yaml(repository_root / "contracts/silver/erp_products.odcs.yaml")
-    element = contract["schema"][0]
+    contract = load_yaml(repository_root / "contracts/silver/erp.odcs.yaml")
+    element = next(obj for obj in contract["schema"] if obj["name"] == "erp_products")
     properties = {prop["name"]: prop for prop in element["properties"]}
     assert properties["product_hierarchy_raw"]["transformSourceObjects"] == ["bronze.erp_products"]
     for name in ("product_family", "product_tier", "product_format", "product_orientation"):
@@ -100,7 +100,9 @@ def test_yaml_edit_changes_ingestion_and_expectations_without_regeneration(repos
     before = load_contract_catalog(tmp_path / "contracts")
     contract_path = tmp_path / "contracts/source/ads.odcs.yaml"
     contract = load_yaml(contract_path)
-    contract["schema"][0]["properties"].append({"name": "placement_type", "logicalType": "string", "required": False})
+    contract["schema"][0]["properties"].append(
+        {"name": "placement_type", "logicalType": "string", "physicalType": "STRING", "required": False}
+    )
     contract["customProperties"][0]["value"] = "paid_media"
     contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
 
@@ -155,6 +157,14 @@ def test_runtime_catalog_uses_odcs_library_and_matches_all_contracts(repository_
 def test_missing_deployed_contracts_fail_with_a_useful_error(tmp_path):
     with pytest.raises(ValueError, match="No ODCS contracts found"):
         load_contract_catalog(tmp_path)
+
+
+def test_inconsistent_logical_and_physical_type_is_rejected(contracts):
+    from medallion_poc.execution import validate_catalog
+
+    contracts.objects["gold.dim_product"]["properties"][0]["logicalType"] = "integer"
+    with pytest.raises(ValueError, match="Logical/physical type mismatch"):
+        validate_catalog(contracts)
 
 
 def test_compatibility_allows_nullable_additions(repository_root):

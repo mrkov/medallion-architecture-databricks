@@ -83,12 +83,14 @@ def source_interfaces(contract: dict[str, Any]) -> tuple[SourceInterface, ...]:
 class ContractCatalog:
     sources: dict[str, SourceInterface]
     expectations: dict[str, dict[str, dict[str, str]]]
+    objects: dict[str, dict[str, Any]]
 
 
 def load_contract_catalog(root: Path) -> ContractCatalog:
     """Load deployed ODCS YAML with the ODCS library and derive runtime interfaces/rules."""
     sources: dict[str, SourceInterface] = {}
     expectations: dict[str, dict[str, dict[str, str]]] = {}
+    objects = {}
     for layer in ("source", "silver", "gold", "platinum"):
         paths = sorted((root / layer).glob("*.odcs.yaml"))
         if not paths:
@@ -109,7 +111,16 @@ def load_contract_catalog(root: Path) -> ContractCatalog:
                 if name in expectations[layer]:
                     raise ValueError(f"Duplicate object {name!r} in {layer} contracts: {path}")
                 expectations[layer][name] = compile_object(contract, name).expectations
-    return ContractCatalog(sources=sources, expectations=expectations)
+                objects[f"{layer}.{name}"] = {
+                    **element,
+                    "contract_id": contract["id"],
+                    "contract_version": contract["version"],
+                }
+    catalog = ContractCatalog(sources=sources, expectations=expectations, objects=objects)
+    from medallion_poc.execution import validate_catalog
+
+    validate_catalog(catalog)
+    return catalog
 
 
 def _identifier(value: str) -> bool:

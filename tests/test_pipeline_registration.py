@@ -41,7 +41,6 @@ def registered_datasets(monkeypatch, repository_root):
 
     configuration = {
         "poc.catalog": "main",
-        "poc.schema_prefix": "poc",
         "poc.volume_name": "landing",
         "poc.bundle_root": str(repository_root),
     }
@@ -81,7 +80,7 @@ def _configured_files(repository_root, pipeline):
     return sorted(paths)
 
 
-@pytest.mark.parametrize("owner", ["erp", "crm", "ads", "gold", "platinum"])
+@pytest.mark.parametrize("owner", ["erp", "crm", "ads", "gold"])
 def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
     repository_root, tmp_path, monkeypatch, registered_datasets, owner
 ):
@@ -105,28 +104,20 @@ def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
     if owner in {"erp", "crm", "ads"}:
         contract = load_yaml(repository_root / f"contracts/source/{owner}.odcs.yaml")
         objects = {element["name"] for element in contract["schema"]}
-        expected = {f"main.poc_{layer}.{name}" for layer in ("bronze", "silver") for name in objects} | {
-            f"main.poc_silver.{owner}_contract_quarantine"
+        expected = {f"main.{layer}_{owner}.{name}" for layer in ("bronze", "silver") for name in objects} | {
+            f"main.silver_{owner}.contract_quarantine"
         }
         assert set(registered_datasets) == expected
         for name in objects:
-            bronze = registered_datasets[f"main.poc_bronze.{name}"]
+            bronze = registered_datasets[f"main.bronze_{owner}.{name}"]
             assert bronze["kind"] == "streaming_table"
             assert bronze["expectations"]["policy"] == "observe"
-            assert registered_datasets[f"main.poc_silver.{name}"]["kind"] == "materialized_view"
+            assert registered_datasets[f"main.silver_{owner}.{name}"]["kind"] == "materialized_view"
         if owner == "erp":
-            assert registered_datasets["main.poc_silver.erp_products"]["expectations"]["policy"] == "fail"
+            assert registered_datasets["main.silver_erp.erp_products"]["expectations"]["policy"] == "fail"
     else:
         contracts = [load_yaml(path) for path in sorted(repository_root.glob(f"contracts/{owner}/*.odcs.yaml"))]
-        if owner == "gold":
-            expected = {f"main.poc_gold.{element['name']}" for contract in contracts for element in contract["schema"]}
-        else:
-            expected = {
-                element["physicalName"].replace("<catalog>", "main").replace("<schema_prefix>", "poc")
-                for contract in contracts
-                for element in contract["schema"]
-                if element["physicalType"] == "materialized view"
-            }
+        expected = {f"main.gold_common.{element['name']}" for contract in contracts for element in contract["schema"]}
         assert set(registered_datasets) == expected
         assert all(value["expectations"]["policy"] == "fail" for value in registered_datasets.values())
 
@@ -191,7 +182,7 @@ def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path,
     contract_path = tmp_path / "contracts/source/crm.odcs.yaml"
     contract = load_yaml(contract_path)
     contract["schema"][0]["properties"].append(
-        {"name": "new_contract_field", "logicalType": "string", "required": False}
+        {"name": "new_contract_field", "logicalType": "string", "physicalType": "STRING", "required": False}
     )
     contract["customProperties"][0]["value"] = "declared_source"
     contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
@@ -209,7 +200,7 @@ def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path,
     assert module["read_landing"]("crm_contacts") is reader
     assert reader.format_name == "cloudFiles"
     assert reader.ddl.endswith("new_contract_field STRING")
-    assert reader.path == "/Volumes/main/poc_landing/landing/declared_source/crm_contacts"
+    assert reader.path == "/Volumes/main/bronze_crm/landing/crm_contacts"
     assert reader.selected == [
         *[prop["name"] for prop in contract["schema"][0]["properties"]],
         "_rescued_data",

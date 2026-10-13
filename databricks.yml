@@ -1,5 +1,5 @@
 bundle:
-  name: medallion-architecture-poc
+  name: medallion-architecture-poc-v2
 
 include:
   - resources/*.yml
@@ -8,15 +8,15 @@ variables:
   catalog:
     description: Unity Catalog catalog used by the POC.
     default: main
-  schema_prefix:
-    description: Prefix for Bronze, Silver, Gold, and domain-specific Platinum mart schemas.
-    default: medallion_poc
   volume_name:
     description: Unity Catalog volume used for arriving source files.
     default: landing
   pipeline_channel:
     description: Lakeflow Declarative Pipelines runtime channel.
     default: CURRENT
+  gold_trigger_status:
+    description: UNPAUSED for automatic refresh; pause when rerunning setup. Bootstrap omits the trigger entirely.
+    default: UNPAUSED
 
 sync:
   include:
@@ -24,11 +24,14 @@ sync:
     - src/**/*.py
     - resources/*.yml
     - tests/**/*.py
+    - demo/**/*.yaml
 
 targets:
   dev:
     mode: development
     default: true
+    presets:
+      trigger_pause_status: UNPAUSED
   prod:
     mode: production
 

@@ -1,362 +1,265 @@
+# Generated from ODCS by scripts/generate_bundle_resources.py; do not hand-edit.
 resources:
   pipelines:
-    erp_source_pipeline:
-      name: "[${bundle.target}] ERP Bronze to Silver"
-      catalog: ${var.catalog}
-      target: ${var.schema_prefix}_bronze
-      channel: ${var.pipeline_channel}
-      serverless: true
-      continuous: false
-      photon: true
-      environment:
-        dependencies:
-          - open-data-contract-standard==3.2.0
-      libraries:
-        - glob:
-            include: ../src/pipelines/erp/**
-      configuration:
-        poc.bundle_root: ${workspace.file_path}
-        poc.catalog: ${var.catalog}
-        poc.schema_prefix: ${var.schema_prefix}
-        poc.volume_name: ${var.volume_name}
-
-    crm_source_pipeline:
-      name: "[${bundle.target}] CRM Bronze to Silver"
-      catalog: ${var.catalog}
-      target: ${var.schema_prefix}_bronze
-      channel: ${var.pipeline_channel}
-      serverless: true
-      continuous: false
-      photon: true
-      environment:
-        dependencies:
-          - open-data-contract-standard==3.2.0
-      libraries:
-        - glob:
-            include: ../src/pipelines/crm/**
-      configuration:
-        poc.bundle_root: ${workspace.file_path}
-        poc.catalog: ${var.catalog}
-        poc.schema_prefix: ${var.schema_prefix}
-        poc.volume_name: ${var.volume_name}
-
     ads_source_pipeline:
-      name: "[${bundle.target}] Ads Bronze to Silver"
+      name: '[${bundle.target}] ADS contract-driven pipeline'
       catalog: ${var.catalog}
-      target: ${var.schema_prefix}_bronze
+      schema: bronze_ads
       channel: ${var.pipeline_channel}
       serverless: true
       continuous: false
       photon: true
       environment:
         dependencies:
-          - open-data-contract-standard==3.2.0
+        - open-data-contract-standard==3.2.0
+        - sqlglot>=27,<28
       libraries:
-        - glob:
-            include: ../src/pipelines/ads/**
+      - glob:
+          include: ../src/pipelines/ads/**
       configuration:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
-        poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-
+    crm_source_pipeline:
+      name: '[${bundle.target}] CRM contract-driven pipeline'
+      catalog: ${var.catalog}
+      schema: bronze_crm
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      environment:
+        dependencies:
+        - open-data-contract-standard==3.2.0
+        - sqlglot>=27,<28
+      libraries:
+      - glob:
+          include: ../src/pipelines/crm/**
+      configuration:
+        poc.bundle_root: ${workspace.file_path}
+        poc.catalog: ${var.catalog}
+        poc.volume_name: ${var.volume_name}
+    erp_source_pipeline:
+      name: '[${bundle.target}] ERP contract-driven pipeline'
+      catalog: ${var.catalog}
+      schema: bronze_erp
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      environment:
+        dependencies:
+        - open-data-contract-standard==3.2.0
+        - sqlglot>=27,<28
+      libraries:
+      - glob:
+          include: ../src/pipelines/erp/**
+      configuration:
+        poc.bundle_root: ${workspace.file_path}
+        poc.catalog: ${var.catalog}
+        poc.volume_name: ${var.volume_name}
     gold_pipeline:
-      name: "[${bundle.target}] Silver to Gold"
+      name: '[${bundle.target}] GOLD contract-driven pipeline'
       catalog: ${var.catalog}
-      target: ${var.schema_prefix}_gold
+      schema: gold_common
       channel: ${var.pipeline_channel}
       serverless: true
       continuous: false
       photon: true
       environment:
         dependencies:
-          - open-data-contract-standard==3.2.0
+        - open-data-contract-standard==3.2.0
+        - sqlglot>=27,<28
       libraries:
-        - file:
-            path: ../src/pipelines/gold.py
+      - file:
+          path: ../src/pipelines/gold.py
       configuration:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
-        poc.schema_prefix: ${var.schema_prefix}
         poc.volume_name: ${var.volume_name}
-
-    platinum_pipeline:
-      name: "[${bundle.target}] Gold to Platinum Sales and Marketing marts"
-      catalog: ${var.catalog}
-      # Preserve the existing pipeline namespace; outputs explicitly use Platinum mart schemas.
-      target: ${var.schema_prefix}_platinum
-      channel: ${var.pipeline_channel}
-      serverless: true
-      continuous: false
-      photon: true
-      environment:
-        dependencies:
-          - open-data-contract-standard==3.2.0
-      libraries:
-        - file:
-            path: ../src/pipelines/platinum.py
-      configuration:
-        poc.bundle_root: ${workspace.file_path}
-        poc.catalog: ${var.catalog}
-        poc.schema_prefix: ${var.schema_prefix}
-        poc.volume_name: ${var.volume_name}
-
   jobs:
-    setup_poc:
-      name: "[${bundle.target}] Set up POC storage and source interfaces"
+    refresh_gold:
+      name: '[${bundle.target}] Gold on Silver changes'
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
+      trigger:
+        pause_status: ${var.gold_trigger_status}
+        table_update:
+          condition: ANY_UPDATED
+          table_names:
+          - ${var.catalog}.silver_ads.ads_campaigns
+          - ${var.catalog}.silver_ads.ads_spend
+          - ${var.catalog}.silver_crm.crm_contacts
+          - ${var.catalog}.silver_erp.erp_customers
+          - ${var.catalog}.silver_erp.erp_order_lines
+          - ${var.catalog}.silver_erp.erp_orders
+          - ${var.catalog}.silver_erp.erp_products
+          wait_after_last_change_seconds: 60
+          min_time_between_triggers_seconds: 120
       tasks:
-        - task_key: initialize
-          run_job_task:
-            job_id: ${resources.jobs.initialize_source_interfaces.id}
-
-    curated_refresh:
-      name: "[${bundle.target}] Refresh Gold and Platinum"
+      - task_key: refresh_gold
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.gold_pipeline.id}
+    setup_poc:
+      name: '[${bundle.target}] Set up contracts, source interfaces and Platinum views'
+      max_concurrent_runs: 1
+      tasks:
+      - task_key: prepare_storage
+        notebook_task:
+          notebook_path: ../src/notebooks/setup_poc.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+      - task_key: initialize_ads
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_crm
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_erp
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_gold
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.gold_pipeline.id}
+        depends_on:
+        - task_key: initialize_ads
+        - task_key: initialize_crm
+        - task_key: initialize_erp
+      - task_key: publish_views
+        notebook_task:
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+        depends_on:
+        - task_key: initialize_gold
+    publish_platinum_views:
+      name: '[${bundle.target}] Publish contract-defined Platinum views'
+      tasks:
+      - task_key: publish_views
+        notebook_task:
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+    ingest_ads:
+      name: '[${bundle.target}] Ingest ADS through Silver'
       max_concurrent_runs: 1
       queue:
         enabled: true
       tasks:
-        - task_key: refresh_gold
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.gold_pipeline.id}
-        - task_key: refresh_platinum
-          depends_on:
-            - task_key: publish_dimension_views
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
-        - task_key: publish_dimension_views
-          depends_on:
-            - task_key: refresh_gold
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: publish_views
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-
-    ingest_erp:
-      name: "[${bundle.target}] Ingest ERP then refresh curated layers"
-      tasks:
-        - task_key: prepare_storage
-          notebook_task:
-            notebook_path: ../src/notebooks/setup_poc.py
-            base_parameters:
-              bundle_root: ${workspace.file_path}
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: ingest_erp
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
-        - task_key: refresh_curated_layers
-          depends_on:
-            - task_key: ingest_erp
-          run_job_task:
-            job_id: ${resources.jobs.curated_refresh.id}
-
+      - task_key: ingest_ads
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
     ingest_crm:
-      name: "[${bundle.target}] Ingest CRM then refresh curated layers"
+      name: '[${bundle.target}] Ingest CRM through Silver'
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
       tasks:
-        - task_key: prepare_storage
-          notebook_task:
-            notebook_path: ../src/notebooks/setup_poc.py
-            base_parameters:
-              bundle_root: ${workspace.file_path}
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: ingest_crm
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-        - task_key: refresh_curated_layers
-          depends_on:
-            - task_key: ingest_crm
-          run_job_task:
-            job_id: ${resources.jobs.curated_refresh.id}
-
-    ingest_ads:
-      name: "[${bundle.target}] Ingest Ads then refresh curated layers"
+      - task_key: ingest_crm
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+    ingest_erp:
+      name: '[${bundle.target}] Ingest ERP through Silver'
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
       tasks:
-        - task_key: prepare_storage
-          notebook_task:
-            notebook_path: ../src/notebooks/setup_poc.py
-            base_parameters:
-              bundle_root: ${workspace.file_path}
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: ingest_ads
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-        - task_key: refresh_curated_layers
-          depends_on:
-            - task_key: ingest_ads
-          run_job_task:
-            job_id: ${resources.jobs.curated_refresh.id}
-
-    initialize_source_interfaces:
-      name: "[${bundle.target}] Initialize source interfaces"
-      tasks:
-        - task_key: prepare_storage
-          notebook_task:
-            notebook_path: ../src/notebooks/setup_poc.py
-            base_parameters:
-              bundle_root: ${workspace.file_path}
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: initialize_erp
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
-        - task_key: initialize_crm
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-        - task_key: initialize_ads
-          depends_on:
-            - task_key: prepare_storage
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-
+      - task_key: ingest_erp
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
     medallion_poc_demo:
-      name: "[${bundle.target}] Four-layer POC staged-arrival demo"
+      name: '[${bundle.target}] Observe automatic Gold enrichment after staged arrivals'
+      max_concurrent_runs: 1
       tasks:
+      - task_key: seed_erp
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: erp
+      - task_key: ingest_erp
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
         - task_key: seed_erp
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: seed_erp
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: process_erp
-          depends_on:
-            - task_key: seed_erp
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
-            full_refresh: true
-        - task_key: initialize_empty_crm
-          depends_on:
-            - task_key: seed_erp
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-            full_refresh: true
-        - task_key: initialize_empty_ads
-          depends_on:
-            - task_key: seed_erp
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-            full_refresh: true
-        - task_key: gold_after_erp
-          depends_on:
-            - task_key: process_erp
-            - task_key: initialize_empty_crm
-            - task_key: initialize_empty_ads
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.gold_pipeline.id}
-            full_refresh: true
-        - task_key: platinum_after_erp
-          depends_on:
-            - task_key: publish_views
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
-            full_refresh: true
-        - task_key: publish_views
-          depends_on:
-            - task_key: gold_after_erp
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: publish_views
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: assert_erp_only
-          depends_on:
-            - task_key: platinum_after_erp
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: assert_erp_only
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
+      - task_key: observe_erp
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: erp
+        depends_on:
+        - task_key: ingest_erp
+      - task_key: seed_crm
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: crm
+        depends_on:
+        - task_key: observe_erp
+      - task_key: ingest_crm
+        run_job_task:
+          job_id: ${resources.jobs.ingest_crm.id}
+        depends_on:
         - task_key: seed_crm
-          depends_on:
-            - task_key: assert_erp_only
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: seed_crm
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: process_crm
-          depends_on:
-            - task_key: seed_crm
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-        - task_key: gold_after_crm
-          depends_on:
-            - task_key: process_crm
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.gold_pipeline.id}
-        - task_key: platinum_after_crm
-          depends_on:
-            - task_key: gold_after_crm
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
-        - task_key: assert_crm_enriched
-          depends_on:
-            - task_key: platinum_after_crm
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: assert_crm_enriched
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
+      - task_key: observe_crm
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: crm
+        depends_on:
+        - task_key: ingest_crm
+      - task_key: seed_ads
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: ads
+        depends_on:
+        - task_key: observe_crm
+      - task_key: ingest_ads
+        run_job_task:
+          job_id: ${resources.jobs.ingest_ads.id}
+        depends_on:
         - task_key: seed_ads
-          depends_on:
-            - task_key: assert_crm_enriched
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: seed_ads
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
-        - task_key: process_ads
-          depends_on:
-            - task_key: seed_ads
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-        - task_key: gold_after_ads
-          depends_on:
-            - task_key: process_ads
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.gold_pipeline.id}
-        - task_key: platinum_after_ads
-          depends_on:
-            - task_key: gold_after_ads
-          pipeline_task:
-            pipeline_id: ${resources.pipelines.platinum_pipeline.id}
-        - task_key: assert_complete
-          depends_on:
-            - task_key: platinum_after_ads
-          notebook_task:
-            notebook_path: ../src/notebooks/demo_control.py
-            base_parameters:
-              action: assert_complete
-              catalog: ${var.catalog}
-              schema_prefix: ${var.schema_prefix}
-              volume_name: ${var.volume_name}
+      - task_key: observe_ads
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: ads
+        depends_on:
+        - task_key: ingest_ads

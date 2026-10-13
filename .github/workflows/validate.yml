@@ -16,6 +16,10 @@ jobs:
       - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
       - name: Install locked dependencies
         run: uv sync --locked --extra dev
       - name: Fetch and verify ODCS v3.2.0 schema
@@ -24,5 +28,7 @@ jobs:
         run: .venv/bin/python scripts/validate_contracts.py
       - name: Run tests
         run: .venv/bin/pytest
+      - name: Check generated bundle resources match contracts
+        run: .venv/bin/python scripts/generate_bundle_resources.py --check
       - name: Lint
         run: .venv/bin/ruff check .

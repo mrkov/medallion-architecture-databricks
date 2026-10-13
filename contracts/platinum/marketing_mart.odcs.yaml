@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 039989dc-c9a6-4188-b164-e46f24554891
 name: platinum_marketing_mart
-version: 2.0.0
+version: 3.0.0
 status: active
 domain: marketing-analytics
 description:
@@ -12,35 +12,149 @@ description:
 team:
   name: analytics-engineering
   members:
-    - username: marketing-analytics-owner
-      role: Data Product Owner
+  - username: marketing-analytics-owner
+    role: Data Product Owner
 slaProperties:
-  - property: frequency
-    value: 5
-    unit: minutes
+- property: frequency
+  value: 5
+  unit: minutes
 schema:
-  - name: fact_campaign_performance
-    physicalName: <catalog>.<schema_prefix>_platinum_marketing.fact_campaign_performance
-    physicalType: materialized view
-    logicalType: object
-    dataGranularityDescription: One row per activity date and campaign code, including revenue-only and spend-only dates.
-    properties:
-      - {name: activity_date, logicalType: date, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_code, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 2}
-      - {name: attributed_revenue, logicalType: number, required: true, semanticType: measure}
-      - {name: incomplete_revenue, logicalType: number, required: true, semanticType: measure}
-      - {name: spend_amount, logicalType: number, required: true, semanticType: measure}
-      - {name: clicks, logicalType: integer, required: true, semanticType: measure}
-      - {name: impressions, logicalType: integer, required: true, semanticType: measure}
-      - {name: return_on_ad_spend, logicalType: number, required: false, semanticType: measure}
-  - name: dim_campaign
-    physicalName: <catalog>.<schema_prefix>_platinum_marketing.dim_campaign
-    physicalType: view
-    logicalType: object
-    description: Virtual SELECT * view over Gold dim_campaign; joins the performance fact by campaign_code.
-    dataGranularityDescription: One current row per campaign_code.
-    properties:
-      - {name: campaign_key, logicalType: string, required: true, primaryKey: true, primaryKeyPosition: 1}
-      - {name: campaign_code, logicalType: string, required: true, unique: true}
-      - {name: campaign_name, logicalType: string, required: true}
-      - {name: platform, logicalType: string, required: true}
+- name: fact_campaign_performance
+  physicalName: <catalog>.platinum_marketing.fact_campaign_performance
+  physicalType: view
+  logicalType: object
+  dataGranularityDescription: One row per activity date and campaign code, including revenue-only and spend-only dates.
+  properties:
+  - name: activity_date
+    logicalType: date
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: DATE
+    transformLogic: coalesce(revenue.activity_date, spend.spend_date)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: campaign_code
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 2
+    physicalType: STRING
+    transformLogic: coalesce(revenue.campaign_code, spend.campaign_code)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: attributed_revenue
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: coalesce(revenue.attributed_revenue, 0)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: incomplete_revenue
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: coalesce(revenue.incomplete_revenue, 0)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: spend_amount
+    logicalType: number
+    required: true
+    semanticType: measure
+    physicalType: DECIMAL(18,2)
+    transformLogic: coalesce(spend.spend_amount, 0)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: clicks
+    logicalType: integer
+    required: true
+    semanticType: measure
+    physicalType: BIGINT
+    transformLogic: coalesce(spend.clicks, 0)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: impressions
+    logicalType: integer
+    required: true
+    semanticType: measure
+    physicalType: BIGINT
+    transformLogic: coalesce(spend.impressions, 0)
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  - name: return_on_ad_spend
+    logicalType: number
+    required: false
+    semanticType: measure
+    physicalType: DECIMAL(18,4)
+    transformLogic: CASE WHEN spend.spend_amount > 0 THEN coalesce(revenue.attributed_revenue, 0) / spend.spend_amount
+      END
+    transformSourceObjects:
+    - gold.fact_attributed_sales
+    - gold.fact_ad_spend_daily
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        revenue: gold.fact_attributed_sales
+        spend: gold.fact_ad_spend_daily
+      from_sql: |-
+        (SELECT order_date AS activity_date, campaign_code,
+          sum(CASE WHEN completeness_status = 'COMPLETE' THEN line_amount ELSE 0 END) AS attributed_revenue,
+          sum(CASE WHEN completeness_status <> 'COMPLETE' THEN line_amount ELSE 0 END) AS incomplete_revenue
+        FROM {{ revenue }} WHERE campaign_code IS NOT NULL
+        GROUP BY order_date, campaign_code) AS revenue
+        FULL OUTER JOIN {{ spend }} AS spend
+        ON revenue.activity_date = spend.spend_date AND revenue.campaign_code = spend.campaign_code
+- name: dim_campaign
+  physicalName: <catalog>.platinum_marketing.dim_campaign
+  physicalType: view
+  logicalType: object
+  description: Contract-defined ordinary SQL view over Gold.
+  dataGranularityDescription: One current row per campaign_code.
+  properties:
+  - name: campaign_key
+    logicalType: string
+    required: true
+    primaryKey: true
+    primaryKeyPosition: 1
+    physicalType: STRING
+    transformLogic: src.campaign_key
+    transformSourceObjects:
+    - gold.dim_campaign
+  - name: campaign_code
+    logicalType: string
+    required: true
+    unique: true
+    physicalType: STRING
+    transformLogic: src.campaign_code
+    transformSourceObjects:
+    - gold.dim_campaign
+  - name: campaign_name
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.campaign_name
+    transformSourceObjects:
+    - gold.dim_campaign
+  - name: platform
+    logicalType: string
+    required: true
+    physicalType: STRING
+    transformLogic: src.platform
+    transformSourceObjects:
+    - gold.dim_campaign
+  customProperties:
+  - property: poc
+    value:
+      inputs:
+        src: gold.dim_campaign
+      from_sql: '{{ src }} AS src'
