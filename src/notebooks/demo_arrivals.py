@@ -1,5 +1,4 @@
 # Databricks notebook source
-# ruff: noqa: E402, F821
 # MAGIC %md
 # MAGIC Run with the same catalog and volume as the deployed bundle.
 # MAGIC Leave bundle_root empty when opening this notebook from the bundle's src/notebooks folder.

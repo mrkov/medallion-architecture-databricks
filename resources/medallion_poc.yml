@@ -83,20 +83,6 @@ resources:
       max_concurrent_runs: 1
       queue:
         enabled: true
-      trigger:
-        pause_status: ${var.gold_trigger_status}
-        table_update:
-          condition: ANY_UPDATED
-          table_names:
-          - ${var.catalog}.silver_ads.ads_campaigns
-          - ${var.catalog}.silver_ads.ads_spend
-          - ${var.catalog}.silver_crm.crm_contacts
-          - ${var.catalog}.silver_erp.erp_customers
-          - ${var.catalog}.silver_erp.erp_order_lines
-          - ${var.catalog}.silver_erp.erp_orders
-          - ${var.catalog}.silver_erp.erp_products
-          wait_after_last_change_seconds: 60
-          min_time_between_triggers_seconds: 120
       tasks:
       - task_key: refresh_gold
         pipeline_task:
