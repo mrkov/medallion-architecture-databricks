@@ -40,5 +40,6 @@ contracts = load_contract_catalog(bundle_root / "contracts")
 # COMMAND ----------
 from medallion_poc.workspace import publish_views
 
-publish_views(spark, contracts, catalog)
+dbutils.widgets.text("department", "")
+publish_views(spark, contracts, catalog, dbutils.widgets.get("department") or None)
 print("Published the Platinum views declared in ODCS.")

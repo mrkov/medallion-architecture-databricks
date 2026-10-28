@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 94da63f7-f9fc-4595-8823-aa27ccb16fe9
 name: gold_commerce_model
-version: 2.1.0
+version: 3.0.0
 status: active
 domain: commerce
 description:
@@ -32,14 +32,14 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'customer', customer.customer_id), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('customer', customer.customer_id)
     transformSourceObjects:
     - silver.erp_customers
     - silver.crm_contacts
   - name: customer_id
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: customer.customer_id
@@ -101,6 +101,7 @@ schema:
     enum:
     - value: ERP_ONLY
     - value: CRM_ENRICHED
+    - value: UNKNOWN
     physicalType: STRING
     transformLogic: CASE WHEN crm.contact_id IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
     transformSourceObjects:
@@ -113,9 +114,23 @@ schema:
       inputs:
         customer: silver.erp_customers
         crm: silver.crm_contacts
-      from_sql: '{{ customer }} AS customer LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY erp_customer_id
-        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm }}) WHERE
-        contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id'
+      from_sql: '{{ customer }} AS customer LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY
+        erp_customer_id ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank
+        FROM {{ crm }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id'
+      unknown_member:
+        customer_key: poc_key('customer', NULL)
+        customer_id: 'NULL'
+        customer_number: '''UNKNOWN'''
+        country_code: '''UNKNOWN'''
+        crm_contact_id: 'NULL'
+        email: '''UNKNOWN'''
+        marketing_consent: 'false'
+        acquisition_channel: '''UNKNOWN'''
+        enrichment_status: '''UNKNOWN'''
+      key_checks:
+      - key: customer_key
+        identity:
+        - customer_id
 - name: dim_product
   physicalType: materialized view
   logicalType: object
@@ -126,13 +141,13 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'product', src.product_id), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('product', src.product_id)
     transformSourceObjects:
     - silver.erp_products
   - name: product_id
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: src.product_id
@@ -187,6 +202,19 @@ schema:
       inputs:
         src: silver.erp_products
       from_sql: '{{ src }} AS src'
+      unknown_member:
+        product_key: poc_key('product', NULL)
+        product_id: 'NULL'
+        product_name: '''UNKNOWN'''
+        product_family: '''UNKNOWN'''
+        product_tier: '''UNKNOWN'''
+        product_format: '''UNKNOWN'''
+        product_orientation: '''UNKNOWN'''
+        active: 'false'
+      key_checks:
+      - key: product_key
+        identity:
+        - product_id
 - name: dim_campaign
   physicalType: materialized view
   logicalType: object
@@ -197,13 +225,13 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'campaign', src.campaign_code), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('campaign', src.campaign_code)
     transformSourceObjects:
     - silver.ads_campaigns
   - name: campaign_code
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: src.campaign_code
@@ -230,6 +258,15 @@ schema:
       inputs:
         src: silver.ads_campaigns
       from_sql: '{{ src }} AS src'
+      unknown_member:
+        campaign_key: poc_key('campaign', NULL)
+        campaign_code: 'NULL'
+        campaign_name: '''UNKNOWN'''
+        platform: '''UNKNOWN'''
+      key_checks:
+      - key: campaign_key
+        identity:
+        - campaign_code
 - name: fact_sales
   physicalType: materialized view
   logicalType: object
@@ -272,16 +309,16 @@ schema:
   - name: customer_key
     logicalType: string
     required: true
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'customer', ord.customer_id), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('customer', ord.customer_id)
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
   - name: product_key
     logicalType: string
     required: true
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'product', line.product_id), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('product', line.product_id)
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -334,15 +371,20 @@ schema:
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
-  - name: customer_version_key
+  - name: customer_id
     logicalType: string
     physicalType: STRING
     required: false
-    transformLogic: CASE WHEN history.customer_id IS NOT NULL THEN sha2(concat_ws('|', 'customer_version', history.customer_id,
-      CAST(unix_micros(history.updated_at) AS STRING)), 256) END
+    transformLogic: ord.customer_id
     transformSourceObjects:
     - silver.erp_orders
-    - silver.erp_customers_history
+  - name: product_id
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: line.product_id
+    transformSourceObjects:
+    - silver.erp_order_lines
   physicalName: <catalog>.gold_common.fact_sales
   customProperties:
   - property: poc
@@ -350,11 +392,7 @@ schema:
       inputs:
         line: silver.erp_order_lines
         ord: silver.erp_orders
-        history: silver.erp_customers_history
-      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id LEFT JOIN (SELECT *, lead(updated_at)
-        OVER (PARTITION BY customer_id ORDER BY updated_at) AS valid_to FROM {{ history }}) AS history ON ord.customer_id
-        = history.customer_id AND ord.order_timestamp >= history.updated_at AND (ord.order_timestamp < history.valid_to OR
-        history.valid_to IS NULL)'
+      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id'
 - name: fact_attributed_sales
   physicalType: materialized view
   logicalType: object
@@ -398,8 +436,8 @@ schema:
   - name: customer_key
     logicalType: string
     required: true
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'customer', ord.customer_id), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('customer', ord.customer_id)
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -408,10 +446,9 @@ schema:
     - silver.ads_campaigns
   - name: campaign_key
     logicalType: string
-    required: false
-    physicalType: STRING
-    transformLogic: CASE WHEN campaign.campaign_code IS NOT NULL THEN sha2(concat_ws('|', 'campaign', campaign.campaign_code),
-      256) END
+    required: true
+    physicalType: BINARY
+    transformLogic: poc_key('campaign', ord.campaign_code)
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -460,8 +497,8 @@ schema:
     - value: CRM_ENRICHED
     - value: COMPLETE
     physicalType: STRING
-    transformLogic: CASE WHEN crm.contact_id IS NOT NULL AND campaign.campaign_code IS NOT NULL THEN 'COMPLETE' WHEN crm.contact_id
-      IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
+    transformLogic: CASE WHEN crm.contact_id IS NOT NULL AND campaign.campaign_code IS NOT NULL THEN 'COMPLETE'
+      WHEN crm.contact_id IS NOT NULL THEN 'CRM_ENRICHED' ELSE 'ERP_ONLY' END
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -483,8 +520,8 @@ schema:
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: CASE WHEN ord.campaign_code IS NULL THEN 'NOT_PROVIDED' WHEN campaign.campaign_code IS NOT NULL THEN 'MATCHED'
-      ELSE 'MISSING' END
+    transformLogic: CASE WHEN ord.campaign_code IS NULL THEN 'NOT_PROVIDED' WHEN campaign.campaign_code IS NOT NULL
+      THEN 'MATCHED' ELSE 'MISSING' END
     transformSourceObjects:
     - silver.erp_order_lines
     - silver.erp_orders
@@ -502,15 +539,20 @@ schema:
     - silver.erp_customers
     - silver.crm_contacts
     - silver.ads_campaigns
-  - name: customer_version_key
+  - name: customer_id
     logicalType: string
     physicalType: STRING
     required: false
-    transformLogic: CASE WHEN history.customer_id IS NOT NULL THEN sha2(concat_ws('|', 'customer_version', history.customer_id,
-      CAST(unix_micros(history.updated_at) AS STRING)), 256) END
+    transformLogic: ord.customer_id
     transformSourceObjects:
     - silver.erp_orders
-    - silver.erp_customers_history
+  - name: order_timestamp
+    logicalType: timestamp
+    physicalType: TIMESTAMP
+    required: true
+    transformLogic: ord.order_timestamp
+    transformSourceObjects:
+    - silver.erp_orders
   physicalName: <catalog>.gold_common.fact_attributed_sales
   customProperties:
   - property: poc
@@ -521,14 +563,11 @@ schema:
         customer: silver.erp_customers
         crm: silver.crm_contacts
         campaign: silver.ads_campaigns
-        history: silver.erp_customers_history
-      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id JOIN {{ customer }} AS customer
-        ON ord.customer_id = customer.customer_id LEFT JOIN (SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY erp_customer_id
-        ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id DESC) AS contact_rank FROM {{ crm }}) WHERE
-        contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id LEFT JOIN {{ campaign }} AS campaign ON ord.campaign_code
-        = campaign.campaign_code LEFT JOIN (SELECT *, lead(updated_at) OVER (PARTITION BY customer_id ORDER BY updated_at)
-        AS valid_to FROM {{ history }}) AS history ON ord.customer_id = history.customer_id AND ord.order_timestamp >= history.updated_at
-        AND (ord.order_timestamp < history.valid_to OR history.valid_to IS NULL)'
+      from_sql: '{{ line }} AS line JOIN {{ ord }} AS ord ON line.order_id = ord.order_id LEFT JOIN {{ customer
+        }} AS customer ON ord.customer_id = customer.customer_id LEFT JOIN (SELECT * FROM (SELECT *, row_number()
+        OVER (PARTITION BY erp_customer_id ORDER BY updated_at DESC, _ingested_at DESC, _source_file DESC, contact_id
+        DESC) AS contact_rank FROM {{ crm }}) WHERE contact_rank = 1) AS crm ON customer.customer_id = crm.erp_customer_id
+        LEFT JOIN {{ campaign }} AS campaign ON ord.campaign_code = campaign.campaign_code'
 - name: fact_ad_spend_daily
   physicalType: materialized view
   logicalType: object
@@ -555,8 +594,8 @@ schema:
   - name: campaign_key
     logicalType: string
     required: true
-    physicalType: STRING
-    transformLogic: sha2(concat_ws('|', 'campaign', src.campaign_code), 256)
+    physicalType: BINARY
+    transformLogic: poc_key('campaign', src.campaign_code)
     transformSourceObjects:
     - silver.ads_spend
   - name: spend_amount
@@ -674,22 +713,49 @@ schema:
         crm_contacts: silver.crm_contacts
         ads_campaigns: silver.ads_campaigns
         ads_spend: silver.ads_spend
-      from_sql: |-
-        (
-        SELECT 'erp_customers' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_customers }}
+      from_sql: '(
+
+        SELECT ''erp_customers'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at)
+        AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE
+        ''AWAITING_DATA'' END AS readiness_status FROM {{ erp_customers }}
+
         UNION ALL
-        SELECT 'erp_products' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_products }}
+
+        SELECT ''erp_products'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at)
+        AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE
+        ''AWAITING_DATA'' END AS readiness_status FROM {{ erp_products }}
+
         UNION ALL
-        SELECT 'erp_orders' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_orders }}
+
+        SELECT ''erp_orders'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS
+        latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE ''AWAITING_DATA''
+        END AS readiness_status FROM {{ erp_orders }}
+
         UNION ALL
-        SELECT 'erp_order_lines' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ erp_order_lines }}
+
+        SELECT ''erp_order_lines'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at)
+        AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE
+        ''AWAITING_DATA'' END AS readiness_status FROM {{ erp_order_lines }}
+
         UNION ALL
-        SELECT 'crm_contacts' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ crm_contacts }}
+
+        SELECT ''crm_contacts'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at)
+        AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE
+        ''AWAITING_DATA'' END AS readiness_status FROM {{ crm_contacts }}
+
         UNION ALL
-        SELECT 'ads_campaigns' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ ads_campaigns }}
+
+        SELECT ''ads_campaigns'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at)
+        AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE
+        ''AWAITING_DATA'' END AS readiness_status FROM {{ ads_campaigns }}
+
         UNION ALL
-        SELECT 'ads_spend' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN 'AVAILABLE' ELSE 'AWAITING_DATA' END AS readiness_status FROM {{ ads_spend }}
-        ) AS readiness
+
+        SELECT ''ads_spend'' AS source_object, max(updated_at) AS latest_source_timestamp, max(_ingested_at) AS
+        latest_ingestion_timestamp, count(*) AS record_count, CASE WHEN count(*) > 0 THEN ''AVAILABLE'' ELSE ''AWAITING_DATA''
+        END AS readiness_status FROM {{ ads_spend }}
+
+        ) AS readiness'
 - name: dim_customer_history
   physicalName: <catalog>.gold_common.dim_customer_history
   physicalType: materialized view
@@ -699,25 +765,24 @@ schema:
   properties:
   - name: customer_version_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: true
-    transformLogic: sha2(concat_ws('|', 'customer_version', src.customer_id, CAST(unix_micros(src.updated_at) AS STRING)),
-      256)
+    transformLogic: poc_key('customer_version', src.customer_id, unix_micros(src.updated_at))
     transformSourceObjects:
     - silver.erp_customers_history
     primaryKey: true
     primaryKeyPosition: 1
   - name: customer_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: true
-    transformLogic: sha2(concat_ws('|', 'customer', src.customer_id), 256)
+    transformLogic: poc_key('customer', src.customer_id)
     transformSourceObjects:
     - silver.erp_customers_history
   - name: customer_id
     logicalType: string
     physicalType: STRING
-    required: true
+    required: false
     transformLogic: src.customer_id
     transformSourceObjects:
     - silver.erp_customers_history
@@ -738,7 +803,7 @@ schema:
   - name: valid_from
     logicalType: timestamp
     physicalType: TIMESTAMP
-    required: true
+    required: false
     transformLogic: src.updated_at
     transformSourceObjects:
     - silver.erp_customers_history
@@ -765,3 +830,72 @@ schema:
       row_checks:
         VALID_INTERVAL: valid_to IS NULL OR valid_to > valid_from
         CURRENT_INTERVAL: is_current = (valid_to IS NULL)
+        KNOWN_VERSION_START: customer_id IS NULL OR valid_from IS NOT NULL
+      unknown_member:
+        customer_version_key: poc_key('customer_version', NULL, NULL)
+        customer_key: poc_key('customer', NULL)
+        customer_id: 'NULL'
+        customer_number: '''UNKNOWN'''
+        country_code: '''UNKNOWN'''
+        valid_from: 'NULL'
+        valid_to: 'NULL'
+        is_current: 'true'
+      key_checks:
+      - key: customer_version_key
+        identity:
+        - customer_id
+        - valid_from
+      - key: customer_key
+        identity:
+        - customer_id
+customProperties:
+- property: key_definitions
+  value:
+    customer:
+      namespace: ERP.customer
+      algorithm: sha256
+      arity: 1
+    product:
+      namespace: ERP.product
+      algorithm: sha256
+      arity: 1
+    campaign:
+      namespace: ADS.campaign
+      algorithm: sha256
+      arity: 1
+    customer_version:
+      namespace: ERP.customer_version
+      algorithm: sha256
+      arity: 2
+- property: orchestration
+  value:
+    control_schema: bronze_operations
+    business_timezone: Europe/Belgrade
+    gold_domains:
+      commerce:
+        pipeline_key: gold_pipeline
+        job_key: refresh_gold
+        refresh: eventual
+        required_sources:
+        - erp
+        - crm
+        - ads
+    departments:
+      sales: {}
+      marketing: {}
+    daily_demo:
+      domain: commerce
+      business_date: '2026-10-01'
+    load_event_columns:
+    - name: source_system
+      physicalType: STRING
+    - name: business_date
+      physicalType: DATE
+    - name: load_group
+      physicalType: STRING
+    - name: run_id
+      physicalType: STRING
+    - name: status
+      physicalType: STRING
+    - name: event_time
+      physicalType: TIMESTAMP

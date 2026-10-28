@@ -21,7 +21,11 @@ def registered_datasets(monkeypatch, repository_root):
         def register(function):
             name = settings["name"]
             assert name not in registered, f"Dataset registered more than once: {name}"
-            registered[name] = {"kind": kind, "expectations": getattr(function, "expectations", {})}
+            registered[name] = {
+                "kind": kind,
+                "schema": settings.get("schema"),
+                "expectations": getattr(function, "expectations", {}),
+            }
             return function
 
         return register
@@ -80,12 +84,18 @@ def _configured_files(repository_root, pipeline):
     return sorted(paths)
 
 
-@pytest.mark.parametrize("owner", ["erp", "crm", "ads", "gold"])
+@pytest.mark.parametrize("owner", ["erp", "crm", "ads", "gold", "platinum"])
 def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
     repository_root, tmp_path, monkeypatch, registered_datasets, owner
 ):
     pipelines = load_yaml(repository_root / "resources/medallion_poc.yml")["resources"]["pipelines"]
-    key = f"{owner}_source_pipeline" if owner in {"erp", "crm", "ads"} else f"{owner}_pipeline"
+    key = (
+        f"{owner}_source_pipeline"
+        if owner in {"erp", "crm", "ads"}
+        else ("platinum_marketing_pipeline" if owner == "platinum" else "gold_pipeline")
+    )
+    if owner == "platinum":
+        sys.modules["pyspark.sql"].SparkSession.getActiveSession().conf.set("poc.domain", "marketing")
     pipeline_root = (repository_root / "src/pipelines").resolve()
     # Simulate Lakeflow: no __file__, no injected spark, an unrelated cwd, and no shared source paths.
     monkeypatch.chdir(tmp_path)
@@ -120,9 +130,15 @@ def test_pipeline_evaluation_without_file_registers_only_its_contracted_tables(
             assert registered_datasets["main.silver_erp.erp_products"]["expectations"]["policy"] == "fail"
     else:
         contracts = [load_yaml(path) for path in sorted(repository_root.glob(f"contracts/{owner}/*.odcs.yaml"))]
-        expected = {f"main.gold_common.{element['name']}" for contract in contracts for element in contract["schema"]}
+        expected = {
+            element["physicalName"].replace("<catalog>", "main")
+            for contract in contracts
+            for element in contract["schema"]
+            if element["physicalType"] == "materialized view"
+        }
         assert set(registered_datasets) == expected
         assert all(value["expectations"]["policy"] == "fail" for value in registered_datasets.values())
+        assert all("PRIMARY KEY" in value["schema"] for value in registered_datasets.values())
 
 
 def test_contract_loader_without_file_uses_configured_root(repository_root, tmp_path, monkeypatch, registered_datasets):
@@ -179,7 +195,7 @@ def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path,
         def withColumn(self, _name, _expression):
             return self
 
-    # Change only a deployed YAML contract; use the actual loader and ingestion helper.
+    # Change only deployed YAML contracts; use the actual loader and ingestion helper.
     shutil.copytree(repository_root / "src", tmp_path / "src", ignore=shutil.ignore_patterns("__pycache__"))
     shutil.copytree(repository_root / "contracts", tmp_path / "contracts")
     contract_path = tmp_path / "contracts/source/crm.odcs.yaml"
@@ -189,6 +205,11 @@ def test_read_landing_consumes_deployed_yaml_directly(repository_root, tmp_path,
     )
     contract["customProperties"][0]["value"] = "declared_source"
     contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
+    policy_path = tmp_path / "contracts/gold/commerce_model.odcs.yaml"
+    policy = load_yaml(policy_path)
+    config = next(p["value"] for p in policy["customProperties"] if p["property"] == "orchestration")
+    config["gold_domains"]["commerce"]["required_sources"] = ["erp", "declared_source", "ads"]
+    policy_path.write_text(yaml.safe_dump(policy, sort_keys=False))
     monkeypatch.syspath_prepend(str(tmp_path / "src/pipelines"))
     reader = Reader()
     spark = sys.modules["pyspark.sql"].SparkSession.getActiveSession()

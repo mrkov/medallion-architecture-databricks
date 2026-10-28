@@ -2,9 +2,9 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 039989dc-c9a6-4188-b164-e46f24554891
 name: platinum_marketing_mart
-version: 3.0.0
+version: 4.0.0
 status: active
-domain: marketing-analytics
+domain: marketing
 description:
   purpose: Marketing data mart containing a daily campaign performance fact and a virtual campaign dimension.
   usage: Campaign performance reporting and return-on-ad-spend analysis.
@@ -21,9 +21,10 @@ slaProperties:
 schema:
 - name: fact_campaign_performance
   physicalName: <catalog>.platinum_marketing.fact_campaign_performance
-  physicalType: view
+  physicalType: materialized view
   logicalType: object
-  dataGranularityDescription: One row per activity date and campaign code, including revenue-only and spend-only dates.
+  dataGranularityDescription: One row per activity date and campaign code, including revenue-only and spend-only
+    dates.
   properties:
   - name: activity_date
     logicalType: date
@@ -126,13 +127,13 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
+    physicalType: BINARY
     transformLogic: src.campaign_key
     transformSourceObjects:
     - gold.dim_campaign
   - name: campaign_code
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: src.campaign_code

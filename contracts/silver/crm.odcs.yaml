@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 8e93ef48-81ab-4756-859b-bd02d60616c4-silver
 name: silver_crm
-version: 2.0.0
+version: 3.0.0
 status: active
 domain: customer
 customProperties:
@@ -28,14 +28,14 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.contact_id
+    transformLogic: nullif(upper(trim(src.contact_id)), '')
     transformSourceObjects:
     - bronze.crm_contacts
   - name: erp_customer_id
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: src.erp_customer_id
+    transformLogic: nullif(upper(trim(src.erp_customer_id)), '')
     transformSourceObjects:
     - bronze.crm_contacts
   - name: email

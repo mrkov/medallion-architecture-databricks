@@ -8,7 +8,7 @@ import yaml
 
 from medallion_poc.contracts import load_contract_catalog, load_yaml
 from medallion_poc.demo import scenario_query
-from medallion_poc.execution import accepted_silver, evaluate_silver, render_query, settings, validate_catalog
+from medallion_poc.execution import accepted_silver, checked_query, evaluate_silver, settings, validate_catalog
 
 
 def local_name(reference):
@@ -40,7 +40,7 @@ def history(spark, contracts, rows):
     return accepted_silver(evaluate_silver(spark, definition, local_name), definition)
 
 
-def test_scd2_demo_rekeys_only_affected_sales_and_preserves_history(spark, contracts, repository_root):
+def test_scd2_demo_resolves_versions_in_platinum_without_rekeying_facts(spark, contracts, repository_root):
     scenario = load_yaml(repository_root / "demo/scd2.yaml")
     records = {name: [] for name in contracts.sources}
     initial_key = after_key = None
@@ -55,9 +55,13 @@ def test_scd2_demo_rekeys_only_affected_sales_and_preserves_history(spark, contr
             if reference.startswith("silver."):
                 materialize(spark, accepted_silver(evaluate_silver(spark, obj, local_name), obj), local_name(reference))
         for reference in ["gold.dim_customer_history", "gold.fact_sales", "gold.fact_attributed_sales"]:
-            materialize(spark, spark.sql(render_query(contracts.objects[reference], local_name)), local_name(reference))
+            materialize(
+                spark, spark.sql(checked_query(contracts.objects[reference], local_name)), local_name(reference)
+            )
         for reference in ["platinum.dim_customer_history", "platinum.sales_history"]:
-            materialize(spark, spark.sql(render_query(contracts.objects[reference], local_name)), local_name(reference))
+            materialize(
+                spark, spark.sql(checked_query(contracts.objects[reference], local_name)), local_name(reference)
+            )
         # Run the very same assertions that the Databricks demo observes.
         for check in step["assertions"]:
             query = scenario_query(check["query"], contracts, "main")
@@ -68,8 +72,10 @@ def test_scd2_demo_rekeys_only_affected_sales_and_preserves_history(spark, contr
                     local_name(reference.replace("source.", "bronze.")),
                 )
             assert spark.sql(query).first()[0] == check["equals"], (stage, check["name"])
-        versions = spark.table("gold_dim_customer_history").orderBy("valid_from").collect()
-        assert len({v.customer_version_key for v in versions}) == len(versions)
+        versions = (
+            spark.table("gold_dim_customer_history").filter("customer_id = 'C_SCD2'").orderBy("valid_from").collect()
+        )
+        assert len({bytes(v.customer_version_key) for v in versions}) == len(versions)
         assert sum(v.is_current for v in versions) == 1
         assert versions[-1].valid_to is None
         for before, after in zip(versions, versions[1:], strict=False):
@@ -78,24 +84,31 @@ def test_scd2_demo_rekeys_only_affected_sales_and_preserves_history(spark, contr
         sales = {r.order_line_id: r for r in spark.table("gold_fact_sales").collect()}
         attributed = {r.order_line_id: r for r in spark.table("gold_fact_attributed_sales").collect()}
         assert len(sales) == len(attributed) == 4
-        assert sales["OL_SCD2_EARLY"].customer_version_key is None
+        assert "customer_version_key" not in sales["OL_SCD2_EARLY"].asDict()
+        report = {r.order_line_id: r for r in spark.table("platinum_sales_history").collect()}
+        assert report["OL_SCD2_EARLY"].customer_version_key is None
         for name in sales:
-            assert sales[name].customer_version_key == attributed[name].customer_version_key
-        key = sales["OL_SCD2_BEFORE"].customer_version_key
+            assert sales[name].customer_key == attributed[name].customer_key
+        key = sales["OL_SCD2_BEFORE"].customer_key
         initial_key = initial_key or key
         assert key == initial_key
         if stage == "move":
-            after_key = sales["OL_SCD2_AFTER"].customer_version_key
-            previous_middle_key = sales["OL_SCD2_MIDDLE"].customer_version_key
-            assert after_key != initial_key
+            after_key = report["OL_SCD2_AFTER"].customer_version_key
+            previous_middle_key = report["OL_SCD2_MIDDLE"].customer_version_key
+            assert report["OL_SCD2_AFTER"].customer_key == initial_key
         if stage in {"repeat", "late"}:
-            assert sales["OL_SCD2_AFTER"].customer_version_key == after_key
+            assert report["OL_SCD2_AFTER"].customer_version_key == after_key
         if stage == "late":
-            assert sales["OL_SCD2_MIDDLE"].customer_version_key != previous_middle_key
+            assert all(row.customer_key == initial_key for row in sales.values())
+            assert report["OL_SCD2_MIDDLE"].customer_version_key != previous_middle_key
             assert [v.country_code for v in versions] == ["CH", "AT", "DE"]
     # Same retained Bronze records give the same keys on another materialization.
-    rerun = spark.sql(render_query(contracts.objects["gold.dim_customer_history"], local_name)).collect()
-    assert {v.customer_version_key for v in rerun} == {v.customer_version_key for v in versions}
+    rerun = (
+        spark.sql(checked_query(contracts.objects["gold.dim_customer_history"], local_name))
+        .filter("customer_id = 'C_SCD2'")
+        .collect()
+    )
+    assert {bytes(v.customer_version_key) for v in rerun} == {bytes(v.customer_version_key) for v in versions}
 
 
 def test_same_time_corrections_invalid_rows_and_return_to_previous_state(spark, contracts):

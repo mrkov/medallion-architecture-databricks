@@ -1,0 +1,40 @@
+stages:
+  initial:
+    source: erp
+    example_batch: keys_initial
+    precondition:
+      query: SELECT count(*) FROM {{ bronze.erp_orders }} WHERE order_id LIKE 'O_KEY_%'
+      equals: 0
+      message: Use another catalog for a full repeat; existing raw data is preserved.
+    assertions:
+    - name: NULL customer_status
+      query: SELECT customer_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_NULL'
+      equals: UNKNOWN
+    - name: NULL product_status
+      query: SELECT product_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_NULL'
+      equals: UNKNOWN
+    - name: LATE customer_status
+      query: SELECT customer_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_LATE'
+      equals: UNMATCHED
+    - name: LATE product_status
+      query: SELECT product_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_LATE'
+      equals: UNMATCHED
+    - name: Both sales remain visible
+      query: SELECT count(*) FROM {{ platinum.sales_detail }} WHERE order_line_id LIKE 'OL_KEY_%'
+      equals: 2
+  late:
+    source: erp
+    example_batch: keys_late
+    assertions:
+    - name: NULL customer_status
+      query: SELECT customer_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_NULL'
+      equals: UNKNOWN
+    - name: LATE customer_status
+      query: SELECT customer_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_LATE'
+      equals: MATCHED
+    - name: LATE product_status
+      query: SELECT product_status FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_LATE'
+      equals: MATCHED
+    - name: Canonical product matches late dimension
+      query: SELECT product_name FROM {{ platinum.sales_detail }} WHERE order_line_id = 'OL_KEY_LATE'
+      equals: Late Photo Book

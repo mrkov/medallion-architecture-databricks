@@ -54,7 +54,7 @@ def test_setup_notebook_can_execute_without_file_global(repository_root, monkeyp
     monkeypatch.setattr(sys, "path", sys.path.copy())
     params = {"catalog": "main", "volume_name": "landing", "bundle_root": str(repository_root)}
     namespace = {
-        "spark": SimpleNamespace(sql=lambda query: None),
+        "spark": SimpleNamespace(sql=lambda query: SimpleNamespace(collect=lambda: [])),
         "dbutils": SimpleNamespace(
             widgets=SimpleNamespace(text=lambda *args: None, get=params.__getitem__),
             fs=SimpleNamespace(mkdirs=lambda path: None),

@@ -9,13 +9,14 @@ from pyspark.sql import functions as F
 
 from medallion_poc.execution import (
     accepted_silver,
+    checked_query,
     evaluate_silver,
     keys,
     physical_name,
     quote,
-    render_query,
     resolve,
     rules,
+    schema_ddl,
     settings,
 )
 
@@ -109,15 +110,24 @@ def register_silver(system):
 
 
 def register_gold():
+    register_materializations("gold", spark.conf.get("poc.domain", "commerce"))
+
+
+def register_materializations(layer, domain):
     for reference, obj in CONTRACTS.objects.items():
-        if not reference.startswith("gold."):
+        if (
+            not reference.startswith(layer + ".")
+            or obj["domain"] != domain
+            or obj["physicalType"] != "materialized view"
+        ):
             continue
 
         def dataset(definition=obj):
-            return spark.sql(render_query(definition, sql_name))
+            return spark.sql(checked_query(definition, sql_name))
 
         dataset = dp.expect_all_or_fail(rules(obj))(dataset)
         dp.materialized_view(
             name=physical_name(obj, CATALOG),
-            table_properties={"layer": "gold", "contract_version": obj["contract_version"]},
+            schema=schema_ddl(obj, spark.conf.get("poc.informational_keys", "true").lower() == "true"),
+            table_properties={"layer": layer, "contract_version": obj["contract_version"]},
         )(dataset)

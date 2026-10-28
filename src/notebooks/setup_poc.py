@@ -38,13 +38,17 @@ for identifier in (catalog, volume_name):
 contracts = load_contract_catalog(bundle_root / "contracts")
 
 # COMMAND ----------
-from medallion_poc.workspace import prepare_storage
+from medallion_poc.operations import prepare_control
+from medallion_poc.workspace import prepare_materializations, prepare_storage
 
 for path in prepare_storage(spark, dbutils, contracts, catalog, volume_name):
     print(path)
-print("Storage ready. Existing files and tables were preserved.")
+prepare_control(spark, contracts, catalog)
+prepare_materializations(spark, contracts, catalog)
+print("Storage and operational receipts ready; retained raw files and tables were preserved.")
 
 # COMMAND ----------
 # MAGIC %md
-# MAGIC The setup_poc job additionally initializes source interfaces, builds empty Gold outputs,
-# MAGIC and publishes Platinum views. Then enable the Gold table-update trigger as described in README.
+# MAGIC The setup_poc job initializes source interfaces, builds Gold and Platinum materializations,
+# MAGIC and publishes ordinary Platinum views. Then enable both table-update triggers as described in README.
+# MAGIC For existing deployments with older key types, use the upgrade_poc job and docs/guide-alignment.md.

@@ -43,10 +43,10 @@ from medallion_poc.demo import scenario_query, seed_source, wait_for_assertions
 
 dbutils.widgets.dropdown("action", "seed", ["seed", "wait"])
 dbutils.widgets.text("stage", "erp")
-dbutils.widgets.dropdown("scenario", "scenario", ["scenario", "scd2"])
+dbutils.widgets.dropdown("scenario", "scenario", ["scenario", "scd2", "keys"])
 stage = dbutils.widgets.get("stage")
 scenario_name = dbutils.widgets.get("scenario")
-if scenario_name not in {"scenario", "scd2"}:
+if scenario_name not in {"scenario", "scd2", "keys"}:
     raise ValueError("Unknown demo scenario")
 scenario = load_yaml(bundle_root / f"demo/{scenario_name}.yaml")
 step = scenario["stages"][stage]

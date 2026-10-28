@@ -1,6 +1,6 @@
 """Shared storage and view publication; all business interfaces come from ODCS."""
 
-from medallion_poc.execution import IDENTIFIER, physical_name, quote, render_query, resolve
+from medallion_poc.execution import IDENTIFIER, checked_query, physical_name, quote, resolve
 
 
 def prepare_storage(spark, dbutils, contracts, catalog, volume):
@@ -26,12 +26,29 @@ def prepare_storage(spark, dbutils, contracts, catalog, volume):
     return directories
 
 
-def publish_views(spark, contracts, catalog):
+def publish_views(spark, contracts, catalog, department=None):
     def sql_name(reference):
         return quote(physical_name(resolve(contracts, reference), catalog))
 
     for reference, obj in contracts.objects.items():
-        if not reference.startswith("platinum."):
+        if not reference.startswith("platinum.") or obj["physicalType"] != "view":
+            continue
+        if department and obj["domain"] != department:
             continue
         target = quote(physical_name(obj, catalog))
-        spark.sql(f"CREATE OR REPLACE VIEW {target} AS {render_query(obj, sql_name)}")
+        spark.sql(f"CREATE OR REPLACE VIEW {target} AS {checked_query(obj, sql_name)}")
+
+
+def prepare_materializations(spark, contracts, catalog):
+    """Replace only ordinary views whose contracts now declare persisted outputs."""
+    for reference, obj in contracts.objects.items():
+        if not reference.startswith("platinum.") or obj["physicalType"] != "materialized view":
+            continue
+        name = physical_name(obj, catalog)
+        _, schema, table = name.split(".")
+        rows = spark.sql(
+            f"SELECT table_type FROM {quote(catalog)}.information_schema.tables "
+            f"WHERE table_schema = '{schema}' AND table_name = '{table}'"
+        ).collect()
+        if rows and rows[0][0] == "VIEW":
+            spark.sql(f"DROP VIEW {quote(name)}")

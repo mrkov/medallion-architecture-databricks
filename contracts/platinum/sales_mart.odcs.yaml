@@ -2,14 +2,14 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 58d61b9c-e987-45dd-9cb3-fe1ab9368736
 name: platinum_sales_mart
-version: 3.1.0
+version: 4.0.0
 status: active
-domain: sales-analytics
+domain: sales
 description:
   purpose: Sales data mart containing an order-line fact, virtual dimensions, and a flattened sales report.
   usage: Semantic models, dashboards, and analytical queries.
-  limitations: sales_detail and dim_customer retain current descriptions; sales_history and dim_customer_history expose ERP
-    customer attributes as of the order timestamp. Product and CRM attributes are not historized.
+  limitations: sales_detail uses current descriptions; sales_history resolves effective-time customer versions in
+    Platinum. Missing values map to UNKNOWN; known unmatched IDs retain their entity keys.
 team:
   name: analytics-engineering
   members:
@@ -58,7 +58,7 @@ schema:
     - gold.dim_product
   - name: customer_number
     logicalType: string
-    required: true
+    required: false
     semanticType: dimension
     physicalType: STRING
     transformLogic: customer.customer_number
@@ -68,7 +68,7 @@ schema:
     - gold.dim_product
   - name: country_code
     logicalType: string
-    required: true
+    required: false
     semanticType: dimension
     physicalType: STRING
     transformLogic: customer.country_code
@@ -78,7 +78,7 @@ schema:
     - gold.dim_product
   - name: product_name
     logicalType: string
-    required: true
+    required: false
     semanticType: dimension
     physicalType: STRING
     transformLogic: product.product_name
@@ -88,7 +88,7 @@ schema:
     - gold.dim_product
   - name: product_family
     logicalType: string
-    required: true
+    required: false
     semanticType: dimension
     physicalType: STRING
     transformLogic: product.product_family
@@ -98,7 +98,7 @@ schema:
     - gold.dim_product
   - name: product_tier
     logicalType: string
-    required: true
+    required: false
     semanticType: dimension
     physicalType: STRING
     transformLogic: product.product_tier
@@ -136,6 +136,24 @@ schema:
     - gold.fact_sales
     - gold.dim_customer
     - gold.dim_product
+  - name: customer_status
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: CASE WHEN sales.customer_id IS NULL THEN 'UNKNOWN' WHEN customer.customer_key IS NULL THEN 'UNMATCHED'
+      ELSE 'MATCHED' END
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_customer
+  - name: product_status
+    logicalType: string
+    physicalType: STRING
+    required: true
+    transformLogic: CASE WHEN sales.product_id IS NULL THEN 'UNKNOWN' WHEN product.product_key IS NULL THEN 'UNMATCHED'
+      ELSE 'MATCHED' END
+    transformSourceObjects:
+    - gold.fact_sales
+    - gold.dim_product
   customProperties:
   - property: poc
     value:
@@ -143,8 +161,8 @@ schema:
         sales: gold.fact_sales
         customer: gold.dim_customer
         product: gold.dim_product
-      from_sql: '{{ sales }} AS sales JOIN {{ customer }} AS customer ON sales.customer_key = customer.customer_key JOIN {{
-        product }} AS product ON sales.product_key = product.product_key'
+      from_sql: '{{ sales }} AS sales LEFT JOIN {{ customer }} AS customer ON sales.customer_key = customer.customer_key
+        LEFT JOIN {{ product }} AS product ON sales.product_key = product.product_key'
 - name: fact_sales
   physicalName: <catalog>.platinum_sales.fact_sales
   physicalType: view
@@ -185,14 +203,14 @@ schema:
   - name: customer_key
     logicalType: string
     required: true
-    physicalType: STRING
+    physicalType: BINARY
     transformLogic: src.customer_key
     transformSourceObjects:
     - gold.fact_sales
   - name: product_key
     logicalType: string
     required: true
-    physicalType: STRING
+    physicalType: BINARY
     transformLogic: src.product_key
     transformSourceObjects:
     - gold.fact_sales
@@ -239,11 +257,18 @@ schema:
     transformLogic: src.order_status
     transformSourceObjects:
     - gold.fact_sales
-  - name: customer_version_key
+  - name: customer_id
     logicalType: string
     physicalType: STRING
     required: false
-    transformLogic: src.customer_version_key
+    transformLogic: src.customer_id
+    transformSourceObjects:
+    - gold.fact_sales
+  - name: product_id
+    logicalType: string
+    physicalType: STRING
+    required: false
+    transformLogic: src.product_id
     transformSourceObjects:
     - gold.fact_sales
   customProperties:
@@ -264,13 +289,13 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
+    physicalType: BINARY
     transformLogic: src.customer_key
     transformSourceObjects:
     - gold.dim_customer
   - name: customer_id
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: src.customer_id
@@ -325,6 +350,7 @@ schema:
     enum:
     - value: ERP_ONLY
     - value: CRM_ENRICHED
+    - value: UNKNOWN
     physicalType: STRING
     transformLogic: src.enrichment_status
     transformSourceObjects:
@@ -347,13 +373,13 @@ schema:
     required: true
     primaryKey: true
     primaryKeyPosition: 1
-    physicalType: STRING
+    physicalType: BINARY
     transformLogic: src.product_key
     transformSourceObjects:
     - gold.dim_product
   - name: product_id
     logicalType: string
-    required: true
+    required: false
     unique: true
     physicalType: STRING
     transformLogic: src.product_id
@@ -416,7 +442,7 @@ schema:
   properties:
   - name: customer_version_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: true
     transformLogic: src.customer_version_key
     transformSourceObjects:
@@ -425,7 +451,7 @@ schema:
     primaryKeyPosition: 1
   - name: customer_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: true
     transformLogic: src.customer_key
     transformSourceObjects:
@@ -433,7 +459,7 @@ schema:
   - name: customer_id
     logicalType: string
     physicalType: STRING
-    required: true
+    required: false
     transformLogic: src.customer_id
     transformSourceObjects:
     - gold.dim_customer_history
@@ -454,7 +480,7 @@ schema:
   - name: valid_from
     logicalType: timestamp
     physicalType: TIMESTAMP
-    required: true
+    required: false
     transformLogic: src.valid_from
     transformSourceObjects:
     - gold.dim_customer_history
@@ -502,25 +528,25 @@ schema:
     - gold.fact_sales
   - name: customer_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: true
     transformLogic: sales.customer_key
     transformSourceObjects:
     - gold.fact_sales
   - name: customer_version_key
     logicalType: string
-    physicalType: STRING
+    physicalType: BINARY
     required: false
-    transformLogic: sales.customer_version_key
+    transformLogic: history.customer_version_key
     transformSourceObjects:
-    - gold.fact_sales
+    - gold.dim_customer_history
   - name: customer_id
     logicalType: string
     physicalType: STRING
     required: false
-    transformLogic: history.customer_id
+    transformLogic: sales.customer_id
     transformSourceObjects:
-    - gold.dim_customer_history
+    - gold.fact_sales
   - name: customer_number_at_order
     logicalType: string
     physicalType: STRING
@@ -539,8 +565,10 @@ schema:
     logicalType: string
     physicalType: STRING
     required: true
-    transformLogic: CASE WHEN history.customer_version_key IS NULL THEN 'MISSING_HISTORY' ELSE 'MATCHED' END
+    transformLogic: CASE WHEN sales.customer_id IS NULL THEN 'UNKNOWN' WHEN history.customer_version_key IS NULL
+      THEN 'MISSING_HISTORY' ELSE 'MATCHED' END
     transformSourceObjects:
+    - gold.fact_sales
     - gold.dim_customer_history
   - name: line_amount
     logicalType: number
@@ -562,4 +590,6 @@ schema:
       inputs:
         sales: gold.fact_sales
         history: gold.dim_customer_history
-      from_sql: '{{ sales }} AS sales LEFT JOIN {{ history }} AS history ON sales.customer_version_key = history.customer_version_key'
+      from_sql: '{{ sales }} AS sales LEFT JOIN {{ history }} AS history ON sales.customer_key = history.customer_key
+        AND (sales.customer_id IS NULL OR (sales.order_timestamp >= history.valid_from AND (sales.order_timestamp
+        < history.valid_to OR history.valid_to IS NULL)))'

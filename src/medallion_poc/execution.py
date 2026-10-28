@@ -8,9 +8,11 @@ from collections.abc import Callable
 import sqlglot
 from sqlglot import exp
 
+from medallion_poc.keys import expand_keys
+
 TOKEN = re.compile(r"\{\{\s*([A-Za-z_][A-Za-z0-9_]*)\s*\}\}")
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
-TYPE = re.compile(r"(?:STRING|BOOLEAN|INT|BIGINT|DATE|TIMESTAMP|DECIMAL\(\d+,\d+\))\Z", re.I)
+TYPE = re.compile(r"(?:STRING|BINARY|BOOLEAN|INT|BIGINT|DATE|TIMESTAMP|DECIMAL\(\d+,\d+\))\Z", re.I)
 ORDER = re.compile(r"([A-Za-z_][A-Za-z0-9_]*) (ASC|DESC)(?: NULLS (FIRST|LAST))?\Z")
 
 
@@ -52,7 +54,9 @@ def resolve(catalog, reference: str) -> dict:
 def projection(obj: dict, tolerant: bool = False) -> str:
     cast = "TRY_CAST" if tolerant else "CAST"
     return ",\n".join(
-        f"{cast}(({p['transformLogic']}) AS {p['physicalType']}) AS {quote(p['name'])}" for p in obj["properties"]
+        f"{cast}(({expand_keys(p['transformLogic'], obj.get('key_definitions', {}))}) "
+        f"AS {p['physicalType']}) AS {quote(p['name'])}"
+        for p in obj["properties"]
     )
 
 
@@ -60,7 +64,49 @@ def render_query(obj: dict, resolve_name: Callable[[str], str], tolerant: bool =
     config = settings(obj)
     payload = ", to_json(struct(src.*), map('ignoreNullFields', 'false')) AS _raw_payload" if raw else ""
     sql = f"SELECT {projection(obj, tolerant)}{payload} FROM {config['from_sql']}"
-    return TOKEN.sub(lambda m: resolve_name(config["inputs"][m[1]]), sql)
+    sql = TOKEN.sub(lambda m: resolve_name(config["inputs"][m[1]]), sql)
+    if member := config.get("unknown_member"):
+        expressions = [
+            f"CAST(({expand_keys(member[p['name']], obj.get('key_definitions', {}))}) AS {p['physicalType']})"
+            for p in obj["properties"]
+        ]
+        sql += " UNION ALL SELECT " + ", ".join(expressions)
+    return sql
+
+
+def checked_query(obj, resolve_name):
+    """Fail within the same input-derived query; no quality table reads a peer output."""
+    query = render_query(obj, resolve_name)
+    checks = []
+    groups = [keys(obj), *[[p["name"]] for p in obj["properties"] if p.get("unique")]]
+    for i, group in enumerate(groups):
+        columns = ", ".join(quote(c) for c in group)
+        checks.append(f"count(*) OVER (PARTITION BY {columns}) AS _poc_unique_{i}")
+    conditions = [f"_poc_unique_{i} = 1" for i in range(len(groups))]
+    for i, check in enumerate(settings(obj).get("key_checks", [])):
+        identity = ", ".join(f"'{c}', {quote(c)}" for c in check["identity"])
+        identity = f"to_json(named_struct({identity}), map('ignoreNullFields', 'false'))"
+        window = f"OVER (PARTITION BY {quote(check['key'])})"
+        checks.append(f"(min({identity}) {window} = max({identity}) {window}) AS _poc_collision_{i}")
+        conditions.append(f"_poc_collision_{i}")
+    conditions.extend(f"coalesce(({value}), false)" for value in rules(obj).values())
+    columns = ", ".join(quote(p["name"]) for p in obj["properties"])
+    condition = " AND ".join(conditions)
+    return (
+        f"SELECT {columns} FROM (SELECT _data.*, {', '.join(checks)} FROM ({query}) AS _data) AS _checked "
+        f"WHERE CASE WHEN {condition} THEN true ELSE CAST(raise_error('Contract quality failure: "
+        f"{obj['name']} grain, key collision or row constraint') AS BOOLEAN) END"
+    )
+
+
+def schema_ddl(obj, primary_keys=True):
+    columns = [
+        f"{quote(p['name'])} {p['physicalType']}" + (" NOT NULL" if p.get("required") else "")
+        for p in obj["properties"]
+    ]
+    if primary_keys:
+        columns.append(f"CONSTRAINT {quote(obj['name'] + '_pk')} PRIMARY KEY ({', '.join(map(quote, keys(obj)))})")
+    return ", ".join(columns)
 
 
 def rules(obj: dict) -> dict[str, str]:
@@ -85,11 +131,14 @@ def validate_catalog(catalog) -> None:
         for prop in obj["properties"]:
             if not IDENTIFIER.fullmatch(prop["name"]):
                 raise ValueError(f"Invalid column in {reference}: {prop['name']}")
+            if prop["name"].lower().startswith("_poc_"):
+                raise ValueError(f"Column uses reserved quality-check prefix: {reference}.{prop['name']}")
             physical_type = prop.get("physicalType", "").upper()
             if not TYPE.fullmatch(physical_type):
                 raise ValueError(f"Unsupported or missing physicalType: {reference}.{prop['name']}")
             expected_logical_type = {
                 "STRING": "string",
+                "BINARY": "string",
                 "INT": "integer",
                 "BIGINT": "integer",
                 "BOOLEAN": "boolean",
@@ -108,7 +157,15 @@ def validate_catalog(catalog) -> None:
         if layer in {"silver", "gold"} and obj["physicalType"] != "materialized view":
             raise ValueError(f"{reference} must declare physicalType: materialized view")
         config = settings(obj)
-        unknown = set(config) - {"inputs", "from_sql", "order_by", "row_checks", "history"}
+        unknown = set(config) - {
+            "inputs",
+            "from_sql",
+            "order_by",
+            "row_checks",
+            "history",
+            "unknown_member",
+            "key_checks",
+        }
         if unknown:
             raise ValueError(f"Unsupported execution settings in {reference}: {sorted(unknown)}")
         allowed = {"silver": "bronze", "gold": "silver", "platinum": "gold"}[layer]
@@ -118,9 +175,27 @@ def validate_catalog(catalog) -> None:
             resolve(catalog, dependency)
         if not keys(obj):
             raise ValueError(f"{reference} needs a primary key defining its grain")
+        if member := config.get("unknown_member"):
+            if layer != "gold" or set(member) != set(columns):
+                raise ValueError(f"{reference}: unknown_member must define every Gold output column")
+        for check in config.get("key_checks", []):
+            if (
+                set(check) != {"key", "identity"}
+                or check["key"] not in columns
+                or not check["identity"]
+                or not set(check["identity"]) <= set(columns)
+            ):
+                raise ValueError(f"{reference}: invalid key collision check")
         for prop in obj["properties"]:
             if not prop.get("transformLogic"):
                 raise ValueError(f"Missing transformLogic: {reference}.{prop['name']}")
+            expression = sqlglot.parse_one(prop["transformLogic"], read="databricks")
+            for node in expression.find_all(exp.Anonymous):
+                if node.name.lower() == "poc_key":
+                    definition = obj["key_definitions"][node.expressions[0].this]
+                    key_type = "BINARY" if definition["algorithm"] == "sha256" else "BIGINT"
+                    if prop["physicalType"].upper() != key_type:
+                        raise ValueError(f"{reference}.{prop['name']}: shared key requires {key_type}")
             if not set(prop.get("transformSourceObjects", [])) <= set(config["inputs"].values()):
                 raise ValueError(f"{reference}: property lineage must refer to declared inputs")
         tokens = set(TOKEN.findall(f"SELECT {projection(obj)} FROM {config['from_sql']}"))
@@ -174,8 +249,8 @@ def validate_catalog(catalog) -> None:
                 not properties[c].get("required") for c in [*business_keys, sequence]
             ):
                 raise ValueError(f"{reference}: history keys must be required and sequence_by must be a TIMESTAMP")
-        if layer == "platinum" and obj["physicalType"] != "view":
-            raise ValueError(f"{reference} must be an ordinary view")
+        if layer == "platinum" and obj["physicalType"] not in {"view", "materialized view"}:
+            raise ValueError(f"{reference} must be a view or materialized view")
 
 
 def evaluate_silver(spark, obj: dict, resolve_name):

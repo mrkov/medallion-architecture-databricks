@@ -20,6 +20,7 @@ resources:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
         poc.volume_name: ${var.volume_name}
+        poc.informational_keys: ${var.informational_keys}
     crm_source_pipeline:
       name: '[${bundle.target}] CRM contract-driven pipeline'
       catalog: ${var.catalog}
@@ -39,6 +40,7 @@ resources:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
         poc.volume_name: ${var.volume_name}
+        poc.informational_keys: ${var.informational_keys}
     erp_source_pipeline:
       name: '[${bundle.target}] ERP contract-driven pipeline'
       catalog: ${var.catalog}
@@ -58,8 +60,9 @@ resources:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
         poc.volume_name: ${var.volume_name}
+        poc.informational_keys: ${var.informational_keys}
     gold_pipeline:
-      name: '[${bundle.target}] GOLD contract-driven pipeline'
+      name: '[${bundle.target}] commerce Gold pipeline'
       catalog: ${var.catalog}
       schema: gold_common
       channel: ${var.pipeline_channel}
@@ -77,12 +80,200 @@ resources:
         poc.bundle_root: ${workspace.file_path}
         poc.catalog: ${var.catalog}
         poc.volume_name: ${var.volume_name}
+        poc.informational_keys: ${var.informational_keys}
+        poc.domain: commerce
+    platinum_marketing_pipeline:
+      name: '[${bundle.target}] marketing Platinum aggregates'
+      catalog: ${var.catalog}
+      schema: platinum_marketing
+      channel: ${var.pipeline_channel}
+      serverless: true
+      continuous: false
+      photon: true
+      environment:
+        dependencies:
+        - open-data-contract-standard==3.2.0
+        - sqlglot==27.29.0
+      libraries:
+      - file:
+          path: ../src/pipelines/platinum.py
+      configuration:
+        poc.bundle_root: ${workspace.file_path}
+        poc.catalog: ${var.catalog}
+        poc.volume_name: ${var.volume_name}
+        poc.informational_keys: ${var.informational_keys}
+        poc.domain: marketing
   jobs:
-    refresh_gold:
-      name: '[${bundle.target}] Gold on Silver changes'
+    ingest_ads:
+      name: '[${bundle.target}] Ingest ADS through Silver'
       max_concurrent_runs: 1
-      queue:
+      queue: &id001
         enabled: true
+      parameters: &id002
+      - name: business_date
+        default: ''
+      - name: load_group
+        default: standard
+      tasks:
+      - task_key: record_started
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: STARTED
+            source: ads
+            receipt_business_date: '{{job.parameters.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+      - task_key: ingest_ads
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+        depends_on:
+        - task_key: record_started
+      - task_key: record_success
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: SUCCEEDED
+            source: ads
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_ads
+      - task_key: record_failure
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: FAILED
+            source: ads
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_ads
+        run_if: AT_LEAST_ONE_FAILED
+    ingest_crm:
+      name: '[${bundle.target}] Ingest CRM through Silver'
+      max_concurrent_runs: 1
+      queue: *id001
+      parameters: *id002
+      tasks:
+      - task_key: record_started
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: STARTED
+            source: crm
+            receipt_business_date: '{{job.parameters.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+      - task_key: ingest_crm
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+        depends_on:
+        - task_key: record_started
+      - task_key: record_success
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: SUCCEEDED
+            source: crm
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_crm
+      - task_key: record_failure
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: FAILED
+            source: crm
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_crm
+        run_if: AT_LEAST_ONE_FAILED
+    ingest_erp:
+      name: '[${bundle.target}] Ingest ERP through Silver'
+      max_concurrent_runs: 1
+      queue: *id001
+      parameters: *id002
+      tasks:
+      - task_key: record_started
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: STARTED
+            source: erp
+            receipt_business_date: '{{job.parameters.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+      - task_key: ingest_erp
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+        depends_on:
+        - task_key: record_started
+      - task_key: record_success
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: SUCCEEDED
+            source: erp
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_erp
+      - task_key: record_failure
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: FAILED
+            source: erp
+            receipt_business_date: '{{tasks.record_started.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+            run_id: '{{job.run_id}}'
+        depends_on:
+        - task_key: ingest_erp
+        run_if: AT_LEAST_ONE_FAILED
+    refresh_gold:
+      name: '[${bundle.target}] commerce Gold refresh'
+      max_concurrent_runs: 1
+      queue: *id001
+      parameters: *id002
+      tasks:
+      - task_key: refresh_gold
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.gold_pipeline.id}
       trigger:
         pause_status: ${var.gold_trigger_status}
         table_update:
@@ -98,13 +289,93 @@ resources:
           - ${var.catalog}.silver_erp.erp_products
           wait_after_last_change_seconds: 60
           min_time_between_triggers_seconds: 120
-      tasks:
-      - task_key: refresh_gold
-        pipeline_task:
-          pipeline_id: ${resources.pipelines.gold_pipeline.id}
-    setup_poc:
-      name: '[${bundle.target}] Set up contracts, source interfaces and Platinum views'
+    refresh_gold_daily_commerce:
+      name: '[${bundle.target}] commerce daily completion gate'
       max_concurrent_runs: 1
+      queue: *id001
+      parameters: *id002
+      tasks:
+      - task_key: require_completion
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: require_ready
+            domain: commerce
+            receipt_business_date: '{{job.parameters.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+      - task_key: refresh
+        run_job_task:
+          job_id: ${resources.jobs.refresh_gold.id}
+          job_parameters:
+            business_date: '{{tasks.require_completion.values.business_date}}'
+            load_group: '{{job.parameters.load_group}}'
+        depends_on:
+        - task_key: require_completion
+    publish_platinum_sales:
+      name: '[${bundle.target}] Publish sales views'
+      tasks:
+      - task_key: publish_views
+        notebook_task:
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            department: sales
+    publish_platinum_marketing:
+      name: '[${bundle.target}] Publish marketing views'
+      tasks:
+      - task_key: publish_views
+        notebook_task:
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            department: marketing
+    refresh_platinum_marketing:
+      name: '[${bundle.target}] marketing Platinum on Gold changes'
+      max_concurrent_runs: 1
+      queue: *id001
+      trigger:
+        pause_status: ${var.platinum_trigger_status}
+        table_update:
+          condition: ANY_UPDATED
+          table_names:
+          - ${var.catalog}.gold_common.fact_ad_spend_daily
+          - ${var.catalog}.gold_common.fact_attributed_sales
+          wait_after_last_change_seconds: 60
+          min_time_between_triggers_seconds: 120
+      tasks:
+      - task_key: refresh_platinum
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.platinum_marketing_pipeline.id}
+    publish_platinum_views:
+      name: '[${bundle.target}] Publish all Platinum views'
+      tasks:
+      - task_key: publish_sales
+        notebook_task: &id003
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            department: sales
+      - task_key: publish_marketing
+        notebook_task: &id004
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            department: marketing
+    setup_poc:
+      name: '[${bundle.target}] Initialize contracts, layers and operational receipts'
+      max_concurrent_runs: 1
+      queue: *id001
       tasks:
       - task_key: prepare_storage
         notebook_task:
@@ -135,55 +406,89 @@ resources:
         - task_key: initialize_ads
         - task_key: initialize_crm
         - task_key: initialize_erp
-      - task_key: publish_views
-        notebook_task:
-          notebook_path: ../src/notebooks/publish_views.py
-          base_parameters:
-            bundle_root: ${workspace.file_path}
-            catalog: ${var.catalog}
-            volume_name: ${var.volume_name}
+      - task_key: initialize_platinum_marketing
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.platinum_marketing_pipeline.id}
         depends_on:
         - task_key: initialize_gold
-    publish_platinum_views:
-      name: '[${bundle.target}] Publish contract-defined Platinum views'
+      - task_key: publish_sales
+        notebook_task: *id003
+        depends_on:
+        - task_key: initialize_gold
+        - task_key: initialize_platinum_marketing
+      - task_key: publish_marketing
+        notebook_task: *id004
+        depends_on:
+        - task_key: initialize_gold
+        - task_key: initialize_platinum_marketing
+    upgrade_poc:
+      name: '[${bundle.target}] Upgrade derived schemas while retaining Bronze history'
+      max_concurrent_runs: 1
+      queue:
+        enabled: true
       tasks:
-      - task_key: publish_views
+      - task_key: prepare_storage
+        notebook_task:
+          notebook_path: ../src/notebooks/setup_poc.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+      - task_key: initialize_ads
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_crm
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_erp
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+        depends_on:
+        - task_key: prepare_storage
+      - task_key: initialize_gold
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.gold_pipeline.id}
+          full_refresh: true
+        depends_on:
+        - task_key: initialize_ads
+        - task_key: initialize_crm
+        - task_key: initialize_erp
+      - task_key: initialize_platinum_marketing
+        pipeline_task:
+          pipeline_id: ${resources.pipelines.platinum_marketing_pipeline.id}
+          full_refresh: true
+        depends_on:
+        - task_key: initialize_gold
+      - task_key: publish_sales
         notebook_task:
           notebook_path: ../src/notebooks/publish_views.py
           base_parameters:
             bundle_root: ${workspace.file_path}
             catalog: ${var.catalog}
             volume_name: ${var.volume_name}
-    ingest_ads:
-      name: '[${bundle.target}] Ingest ADS through Silver'
-      max_concurrent_runs: 1
-      queue:
-        enabled: true
-      tasks:
-      - task_key: ingest_ads
-        pipeline_task:
-          pipeline_id: ${resources.pipelines.ads_source_pipeline.id}
-    ingest_crm:
-      name: '[${bundle.target}] Ingest CRM through Silver'
-      max_concurrent_runs: 1
-      queue:
-        enabled: true
-      tasks:
-      - task_key: ingest_crm
-        pipeline_task:
-          pipeline_id: ${resources.pipelines.crm_source_pipeline.id}
-    ingest_erp:
-      name: '[${bundle.target}] Ingest ERP through Silver'
-      max_concurrent_runs: 1
-      queue:
-        enabled: true
-      tasks:
-      - task_key: ingest_erp
-        pipeline_task:
-          pipeline_id: ${resources.pipelines.erp_source_pipeline.id}
+            department: sales
+        depends_on:
+        - task_key: initialize_gold
+        - task_key: initialize_platinum_marketing
+      - task_key: publish_marketing
+        notebook_task:
+          notebook_path: ../src/notebooks/publish_views.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            department: marketing
+        depends_on:
+        - task_key: initialize_gold
+        - task_key: initialize_platinum_marketing
     medallion_poc_demo:
-      name: '[${bundle.target}] Observe automatic Gold enrichment after staged arrivals'
+      name: '[${bundle.target}] Observe automatic enrichment'
       max_concurrent_runs: 1
+      queue: *id001
       tasks:
       - task_key: seed_erp
         notebook_task:
@@ -271,8 +576,9 @@ resources:
         depends_on:
         - task_key: ingest_ads
     scd2_demo:
-      name: '[${bundle.target}] Observe customer SCD Type 2 history and late arrivals'
+      name: '[${bundle.target}] Observe SCD2 history'
       max_concurrent_runs: 1
+      queue: *id001
       tasks:
       - task_key: seed_initial
         notebook_task:
@@ -388,3 +694,128 @@ resources:
             scenario: scd2
         depends_on:
         - task_key: ingest_late
+    key_handling_demo:
+      name: '[${bundle.target}] Observe unknown and late dimensions'
+      max_concurrent_runs: 1
+      queue: *id001
+      tasks:
+      - task_key: seed_initial
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: initial
+            scenario: keys
+      - task_key: ingest_initial
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_initial
+      - task_key: observe_initial
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: initial
+            scenario: keys
+        depends_on:
+        - task_key: ingest_initial
+      - task_key: seed_late
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: seed
+            stage: late
+            scenario: keys
+        depends_on:
+        - task_key: observe_initial
+      - task_key: ingest_late
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+        depends_on:
+        - task_key: seed_late
+      - task_key: observe_late
+        notebook_task:
+          notebook_path: ../src/notebooks/demo_arrivals.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: wait
+            stage: late
+            scenario: keys
+        depends_on:
+        - task_key: ingest_late
+    daily_gate_demo:
+      name: '[${bundle.target}] Daily completion including zero-new-data loads'
+      max_concurrent_runs: 1
+      queue: *id001
+      tasks:
+      - task_key: observe_blocked
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: gate
+            expected_ready: 'false'
+            domain: commerce
+            receipt_business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+      - task_key: load_erp
+        run_job_task:
+          job_id: ${resources.jobs.ingest_erp.id}
+          job_parameters:
+            business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+        depends_on:
+        - task_key: observe_blocked
+      - task_key: load_crm
+        run_job_task:
+          job_id: ${resources.jobs.ingest_crm.id}
+          job_parameters:
+            business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+        depends_on:
+        - task_key: observe_blocked
+      - task_key: observe_late_source
+        notebook_task:
+          notebook_path: ../src/notebooks/load_control.py
+          base_parameters:
+            bundle_root: ${workspace.file_path}
+            catalog: ${var.catalog}
+            volume_name: ${var.volume_name}
+            action: gate
+            expected_ready: 'false'
+            domain: commerce
+            receipt_business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+        depends_on:
+        - task_key: load_erp
+        - task_key: load_crm
+      - task_key: load_ads
+        run_job_task:
+          job_id: ${resources.jobs.ingest_ads.id}
+          job_parameters:
+            business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+        depends_on:
+        - task_key: observe_late_source
+      - task_key: gated_gold
+        run_job_task:
+          job_id: ${resources.jobs.refresh_gold_daily_commerce.id}
+          job_parameters:
+            business_date: '2026-10-01'
+            load_group: daily_demo_{{job.run_id}}
+        depends_on:
+        - task_key: load_ads

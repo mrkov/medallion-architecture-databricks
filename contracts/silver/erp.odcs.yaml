@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d-silver
 name: silver_erp
-version: 2.1.0
+version: 3.0.0
 status: active
 domain: commerce
 customProperties:
@@ -11,7 +11,8 @@ customProperties:
 description:
   purpose: Typed ERP interfaces with current records and customer change history.
   usage: Source-oriented materialized views derived only from Bronze.
-  limitations: Customer updated_at is treated as the business-effective timestamp; only received changes can be reconstructed.
+  limitations: Customer updated_at is treated as the business-effective timestamp; only received changes can be
+    reconstructed.
 team:
   name: commerce-data
   members:
@@ -29,14 +30,14 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.customer_id
+    transformLogic: nullif(upper(trim(src.customer_id)), '')
     transformSourceObjects:
     - bronze.erp_customers
   - name: customer_number
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: src.customer_number
+    transformLogic: nullif(upper(trim(src.customer_number)), '')
     transformSourceObjects:
     - bronze.erp_customers
   - name: country_code
@@ -103,7 +104,7 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.product_id
+    transformLogic: nullif(upper(trim(src.product_id)), '')
     transformSourceObjects:
     - bronze.erp_products
   - name: product_name
@@ -201,7 +202,8 @@ schema:
       - _source_file DESC
       row_checks:
         HIERARCHY_SEGMENT_COUNT: size(split(product_hierarchy_raw, '[|]', -1)) = 4
-        HIERARCHY_EMPTY_SEGMENT: NOT exists(split(product_hierarchy_raw, '[|]', -1), part -> length(trim(part)) = 0)
+        HIERARCHY_EMPTY_SEGMENT: NOT exists(split(product_hierarchy_raw, '[|]', -1), part -> length(trim(part))
+          = 0)
 - name: erp_orders
   physicalType: materialized view
   logicalType: object
@@ -213,14 +215,14 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.order_id
+    transformLogic: nullif(upper(trim(src.order_id)), '')
     transformSourceObjects:
     - bronze.erp_orders
   - name: customer_id
     logicalType: string
-    required: true
+    required: false
     physicalType: STRING
-    transformLogic: src.customer_id
+    transformLogic: nullif(upper(trim(src.customer_id)), '')
     transformSourceObjects:
     - bronze.erp_orders
   - name: order_timestamp
@@ -248,7 +250,7 @@ schema:
     logicalType: string
     required: false
     physicalType: STRING
-    transformLogic: src.campaign_code
+    transformLogic: nullif(upper(trim(src.campaign_code)), '')
     transformSourceObjects:
     - bronze.erp_orders
   - name: updated_at
@@ -301,21 +303,21 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.order_line_id
+    transformLogic: nullif(upper(trim(src.order_line_id)), '')
     transformSourceObjects:
     - bronze.erp_order_lines
   - name: order_id
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: src.order_id
+    transformLogic: nullif(upper(trim(src.order_id)), '')
     transformSourceObjects:
     - bronze.erp_order_lines
   - name: product_id
     logicalType: string
-    required: true
+    required: false
     physicalType: STRING
-    transformLogic: src.product_id
+    transformLogic: nullif(upper(trim(src.product_id)), '')
     transformSourceObjects:
     - bronze.erp_order_lines
   - name: quantity
@@ -384,14 +386,14 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.customer_id
+    transformLogic: nullif(upper(trim(src.customer_id)), '')
     transformSourceObjects:
     - bronze.erp_customers
   - name: customer_number
     logicalType: string
     required: true
     physicalType: STRING
-    transformLogic: src.customer_number
+    transformLogic: nullif(upper(trim(src.customer_number)), '')
     transformSourceObjects:
     - bronze.erp_customers
   - name: country_code

@@ -105,6 +105,12 @@ def test_yaml_edit_changes_ingestion_and_expectations_without_regeneration(repos
     )
     contract["customProperties"][0]["value"] = "paid_media"
     contract_path.write_text(yaml.safe_dump(contract, sort_keys=False))
+    # A renamed source must also be named consistently in the contract's completion policy.
+    policy_path = tmp_path / "contracts/gold/commerce_model.odcs.yaml"
+    policy = load_yaml(policy_path)
+    config = next(p["value"] for p in policy["customProperties"] if p["property"] == "orchestration")
+    config["gold_domains"]["commerce"]["required_sources"] = ["erp", "crm", "paid_media"]
+    policy_path.write_text(yaml.safe_dump(policy, sort_keys=False))
 
     after = load_contract_catalog(tmp_path / "contracts")
     assert "placement_type" not in before.sources["ads_campaigns"].columns
@@ -185,3 +191,10 @@ def test_compatibility_detects_removed_or_retyped_fields(repository_root):
         "changed type of sales_detail.line_amount",
         "removed property sales_detail.currency_code",
     ]
+
+
+def test_key_storage_type_change_is_breaking_even_with_same_logical_type(repository_root):
+    previous = load_yaml(repository_root / "contracts/gold/commerce_model.odcs.yaml")
+    current = copy.deepcopy(previous)
+    previous["schema"][0]["properties"][0]["physicalType"] = "STRING"
+    assert breaking_changes(previous, current) == ["changed physical type of dim_customer.customer_key"]

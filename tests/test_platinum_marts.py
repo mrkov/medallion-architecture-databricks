@@ -4,7 +4,15 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 
-from medallion_poc.execution import accepted_silver, evaluate_silver, keys, physical_name, render_query, rules, settings
+from medallion_poc.execution import (
+    accepted_silver,
+    checked_query,
+    evaluate_silver,
+    keys,
+    physical_name,
+    rules,
+    settings,
+)
 from medallion_poc.workspace import publish_views
 
 
@@ -15,7 +23,9 @@ def local_name(reference):
 def assert_interface(frame, obj):
     assert frame.columns == [p["name"] for p in obj["properties"]]
     rows = frame.collect()
-    assert len({tuple(row[key] for key in keys(obj)) for row in rows}) == len(rows)
+    assert len(
+        {tuple(bytes(row[key]) if isinstance(row[key], bytearray) else row[key] for key in keys(obj)) for row in rows}
+    ) == len(rows)
     condition = " AND ".join(f"coalesce(({expression}), false)" for expression in rules(obj).values())
     assert frame.filter(f"NOT ({condition})").count() == 0
     expected_types = {
@@ -55,7 +65,7 @@ def test_late_arrivals_converge_and_every_mart_is_a_gold_view(spark, contracts):
         for reference, obj in contracts.objects.items():
             if not reference.startswith("gold."):
                 continue
-            result = spark.sql(render_query(obj, local_name))
+            result = spark.sql(checked_query(obj, local_name))
             result = spark.createDataFrame(result.collect(), result.schema)
             result.createOrReplaceTempView(local_name(reference))
             if stage == "ads":
@@ -66,8 +76,8 @@ def test_late_arrivals_converge_and_every_mart_is_a_gold_view(spark, contracts):
         for reference, obj in contracts.objects.items():
             if not reference.startswith("platinum."):
                 continue
-            assert obj["physicalType"] == "view"
-            spark.sql(f"CREATE OR REPLACE TEMP VIEW {local_name(reference)} AS {render_query(obj, local_name)}")
+            assert obj["physicalType"] in {"view", "materialized view"}
+            spark.sql(f"CREATE OR REPLACE TEMP VIEW {local_name(reference)} AS {checked_query(obj, local_name)}")
             if stage == "ads":
                 assert_interface(spark.table(local_name(reference)), obj)
         sales = spark.table("platinum_sales_detail").first()
@@ -81,15 +91,17 @@ def test_late_arrivals_converge_and_every_mart_is_a_gold_view(spark, contracts):
     assert performance.incomplete_revenue == Decimal("0")
     assert performance.spend_amount == Decimal("20.00")
     assert performance.return_on_ad_spend == Decimal("2.9900")
-    assert spark.table("gold_dim_product").count() == 1
+    assert spark.table("gold_dim_product").filter("product_id IS NOT NULL").count() == 1
     assert spark.table("bronze_erp_products").count() == 2
 
 
 def test_publisher_creates_every_mart_as_an_ordinary_view(contracts):
     statements = []
     publish_views(SimpleNamespace(sql=statements.append), contracts, "main")
-    expected = [obj for ref, obj in contracts.objects.items() if ref.startswith("platinum.")]
-    assert len(statements) == len(expected) == 8
+    expected = [
+        obj for ref, obj in contracts.objects.items() if ref.startswith("platinum.") and obj["physicalType"] == "view"
+    ]
+    assert len(statements) == len(expected) == 7
     for query, obj in zip(statements, expected, strict=True):
         assert query.startswith("CREATE OR REPLACE VIEW ")
         assert physical_name(obj, "main").replace(".", "`.`") in query

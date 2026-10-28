@@ -10,35 +10,22 @@ valid at its **order timestamp**. It preserves the existing current-state report
 | `silver_erp.erp_customers_history` | Typed change events, deduplicated by customer ID and effective timestamp; unchanged repeats collapsed |
 | `gold_common.dim_customer` | Current ERP customer attributes and current CRM enrichment |
 | `gold_common.dim_customer_history` | SCD2 versions of ERP customer number and country, with validity intervals |
-| `gold_common.fact_sales`, `fact_attributed_sales` | Existing business-level `customer_key` plus temporal `customer_version_key` |
+| `gold_common.fact_sales`, `fact_attributed_sales` | Stable business-level `customer_key` and order timestamp; no version key |
 | `platinum_sales.dim_customer_history` | Ordinary view of the history dimension |
 | `platinum_sales.sales_history` | Sales with customer number and country as of the order timestamp |
 
-Gold facts derive their version keys directly from Silver history; they never read the Gold dimension.
-Platinum joins the Gold fact and Gold history dimension by `customer_version_key`. Current `sales_detail`
+Gold facts compute entity keys from their own Silver inputs; they never read the Gold dimension.
+Platinum joins the Gold fact and Gold history dimension by entity key and order timestamp. Current `sales_detail`
 and `dim_customer` retain their existing meaning. CRM and product attributes are not historized in this example.
 
 ## Install the updated definitions
 
-For a new deployment, follow the README's bootstrap/setup instructions. For an existing deployment, the
-same sequence adds the history objects and republishes the Platinum views without clearing data:
-
-```bash
-git pull
-uv sync --locked
-.venv/bin/python scripts/generate_bundle_resources.py --bootstrap
-databricks bundle deploy --profile medallion-poc -t dev \
-  --var catalog=main --var gold_trigger_status=PAUSED
-databricks bundle run setup_poc --profile medallion-poc -t dev --var catalog=main
-.venv/bin/python scripts/generate_bundle_resources.py
-databricks bundle deploy --profile medallion-poc -t dev \
-  --var catalog=main --var gold_trigger_status=UNPAUSED
-```
-
-Let any already-running source/Gold updates finish before running setup. The temporary bootstrap deployment
-removes the table watcher while setup creates `silver_erp.erp_customers_history`. Normal generation then adds
-that table to the watcher alongside the seven existing Silver inputs. No full refresh or table deletion is used.
-The new history materialized view reads the existing retained Bronze records on initialization.
+For a new deployment, follow the [README's bootstrap/setup instructions](../README.md#deploy-and-set-up).
+For an existing v2 deployment, follow the [upgrade instructions](guide-alignment.md#upgrade-an-existing-v2-deployment).
+The key representation now changes from hex STRING to BINARY, and facts no longer publish a version key.
+The explicit upgrade job rebuilds Gold and Platinum materializations from their preceding layers. Source
+pipelines run normally, retaining Bronze history and ingestion checkpoints. Pause both automatic triggers
+and let active source and downstream jobs finish before upgrading.
 
 ## Run the demonstration
 
@@ -46,8 +33,8 @@ The new history materialized view reads the existing retained Bronze records on 
 databricks bundle run scd2_demo --profile medallion-poc -t dev --var catalog=main
 ```
 
-The job appears as **[dev] Observe customer SCD Type 2 history and late arrivals**. Watch **Gold on Silver
-changes** alongside it. The demo seeds contract-defined CSV batches, runs `ingest_erp`, and observes results.
+The job appears as **[dev] Observe SCD2 history**. Watch **[dev] commerce Gold refresh** alongside it.
+The demo seeds contract-defined CSV batches, runs `ingest_erp`, and observes results.
 It never invokes Gold itself. A disabled trigger causes observations to time out rather than bypassing it.
 
 It uses dedicated `C_SCD2`, `P_SCD2`, and `O_SCD2_*`/`OL_SCD2_*` identifiers, so it can run after the existing
@@ -95,9 +82,11 @@ Expected sales after the final stage:
 | OL_SCD2_AFTER | October 3, 00:00 | DE | MATCHED |
 
 The middle sale initially joins CH, then switches to AT when the late record arrives. Its amount stays the
-same. The before/after sale keys stay stable. The sale exactly at the move timestamp joins the new DE
+same. All Gold fact entity keys stay stable, including the middle sale's key. The sale exactly at the move timestamp joins the new DE
 version: validity intervals include `valid_from` and exclude `valid_to`. A sale before the first known
-version remains in the fact with a null version key; no historical state is invented.
+version remains in the fact with its entity key. Its Platinum history result has a null version key and
+MISSING_HISTORY status; no historical state is invented. A sale with no customer ID uses the UNKNOWN
+entity key and joins the dimension's timeless UNKNOWN row. A known ID lacking history never becomes UNKNOWN.
 
 ## Contracts control history
 
@@ -117,9 +106,10 @@ returning to a previous country after another country creates a new version. Met
 do not open versions. The separate current-state Silver table still retains the latest valid full record.
 
 Gold contract expressions define the validity columns with `lead(updated_at)`, `is_current`, and the key.
-A version key is a SHA256 string derived from customer ID and the effective timestamp in epoch microseconds.
+A version key is a SHA256 BINARY value derived from customer ID and effective timestamp in epoch microseconds,
+using the shared `customer_version` namespace. Use `hex(customer_version_key)` to display it as text.
 It does not change merely because a file is reingested, a version closes, or an unchanged repeat arrives.
-The existing `customer_key` remains a business-level hash. No integer identity registry is introduced.
+The `customer_key` is a separate namespaced entity hash. No integer identity registry is introduced.
 
 The fixture batches live in the source ODCS contract under `poc.demo_batches`; `demo/scd2.yaml` contains
 observations and expected results. No customer fields or business transformations are hardcoded in notebooks.
@@ -131,7 +121,8 @@ observations and expected results. No customer fields or business transformation
 - For conflicting versions at the same effective timestamp, the latest valid `_ingested_at` wins; the declared
   file ordering and row hash break remaining ties. Invalid corrections are quarantined. A production source
   should supply a reliable event sequence if ingestion order does not define correction precedence.
-- This is effective-time history. Late events/corrections may revise historical intervals and fact keys.
+- This is effective-time history. Late events/corrections may revise historical intervals and the version
+  resolved in Platinum; Gold fact entity keys remain stable.
   It does not retain a second timeline of what the warehouse believed at each earlier ingestion time.
 - Every input is a full after-image. Deletes, partial CDC updates and inferred deletion from missing snapshot
   rows are not implemented. `is_current` marks the last known effective version, not a wall-clock filter;

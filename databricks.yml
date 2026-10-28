@@ -17,6 +17,12 @@ variables:
   gold_trigger_status:
     description: UNPAUSED for automatic refresh; pause when rerunning setup. Bootstrap omits the trigger entirely.
     default: UNPAUSED
+  platinum_trigger_status:
+    description: Pause during setup; otherwise Gold changes refresh department aggregates.
+    default: UNPAUSED
+  informational_keys:
+    description: Publish informational primary keys in materialized-view schema definitions.
+    default: "true"
 
 sync:
   include:

@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 9e2846d5-52a3-44d1-8f8d-a22a321bfa47-silver
 name: silver_ads
-version: 2.0.0
+version: 3.0.0
 status: active
 domain: marketing
 customProperties:
@@ -28,7 +28,7 @@ schema:
     primaryKey: true
     primaryKeyPosition: 1
     physicalType: STRING
-    transformLogic: src.campaign_code
+    transformLogic: nullif(upper(trim(src.campaign_code)), '')
     transformSourceObjects:
     - bronze.ads_campaigns
   - name: campaign_name
@@ -104,7 +104,7 @@ schema:
     primaryKey: true
     primaryKeyPosition: 2
     physicalType: STRING
-    transformLogic: src.campaign_code
+    transformLogic: nullif(upper(trim(src.campaign_code)), '')
     transformSourceObjects:
     - bronze.ads_spend
   - name: spend_amount

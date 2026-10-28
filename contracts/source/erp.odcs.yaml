@@ -2,7 +2,7 @@ apiVersion: v3.2.0
 kind: DataContract
 id: 7d3f83ab-8167-4a6a-9b21-1f345713a39d
 name: erp_source_files
-version: 2.1.0
+version: 3.0.0
 status: active
 domain: commerce
 customProperties:
@@ -80,6 +80,12 @@ schema:
           country_code: AT
           created_at: '2026-10-01T09:00:00Z'
           updated_at: '2026-10-02T00:00:00Z'
+        keys_late:
+        - customer_id: C_KEY_LATE
+          customer_number: CUST-KEY-LATE
+          country_code: CH
+          created_at: '2026-10-01T00:00:00Z'
+          updated_at: '2026-10-01T00:00:00Z'
 - name: erp_products
   physicalType: file
   logicalType: object
@@ -134,6 +140,12 @@ schema:
           product_hierarchy: PHOTOBOOK|PREMIUM|A4|LANDSCAPE
           active_flag: 'true'
           updated_at: '2026-10-01T09:00:00Z'
+        keys_late:
+        - product_id: P_KEY_LATE
+          product_name: Late Photo Book
+          product_hierarchy: PHOTOBOOK|PREMIUM|A4|LANDSCAPE
+          active_flag: 'true'
+          updated_at: '2026-10-01T00:00:00Z'
 - name: erp_orders
   physicalType: file
   logicalType: object
@@ -147,7 +159,7 @@ schema:
     physicalType: STRING
   - name: customer_id
     logicalType: string
-    required: true
+    required: false
     physicalType: STRING
   - name: order_timestamp
     logicalType: string
@@ -211,6 +223,21 @@ schema:
           currency_code: CHF
           campaign_code: ''
           updated_at: '2026-10-03T00:00:00Z'
+        keys_initial:
+        - order_id: O_KEY_NULL
+          customer_id: null
+          order_timestamp: '2026-10-05T10:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: null
+          updated_at: '2026-10-05T10:00:00Z'
+        - order_id: O_KEY_LATE
+          customer_id: ' c_key_late '
+          order_timestamp: '2026-10-05T10:00:00Z'
+          order_status: CONFIRMED
+          currency_code: CHF
+          campaign_code: null
+          updated_at: '2026-10-05T10:00:00Z'
 - name: erp_order_lines
   physicalType: file
   logicalType: object
@@ -228,7 +255,7 @@ schema:
     physicalType: STRING
   - name: product_id
     logicalType: string
-    required: true
+    required: false
     physicalType: STRING
   - name: quantity
     logicalType: string
@@ -279,3 +306,16 @@ schema:
           quantity: '1'
           unit_price: '29.90'
           updated_at: '2026-10-03T00:00:00Z'
+        keys_initial:
+        - order_line_id: OL_KEY_NULL
+          order_id: O_KEY_NULL
+          product_id: null
+          quantity: '1'
+          unit_price: '10.00'
+          updated_at: '2026-10-05T10:00:00Z'
+        - order_line_id: OL_KEY_LATE
+          order_id: O_KEY_LATE
+          product_id: ' p_key_late '
+          quantity: '1'
+          unit_price: '10.00'
+          updated_at: '2026-10-05T10:00:00Z'

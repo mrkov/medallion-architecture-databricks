@@ -84,6 +84,8 @@ class ContractCatalog:
     sources: dict[str, SourceInterface]
     expectations: dict[str, dict[str, dict[str, str]]]
     objects: dict[str, dict[str, Any]]
+    key_definitions: dict[str, dict[str, Any]]
+    orchestration: dict[str, Any]
 
 
 def load_contract_catalog(root: Path) -> ContractCatalog:
@@ -91,6 +93,8 @@ def load_contract_catalog(root: Path) -> ContractCatalog:
     sources: dict[str, SourceInterface] = {}
     expectations: dict[str, dict[str, dict[str, str]]] = {}
     objects = {}
+    key_definitions = {}
+    orchestration = {}
     for layer in ("source", "silver", "gold", "platinum"):
         paths = sorted((root / layer).glob("*.odcs.yaml"))
         if not paths:
@@ -101,6 +105,15 @@ def load_contract_catalog(root: Path) -> ContractCatalog:
             if model.apiVersion != "v3.2.0" or model.kind != "DataContract" or not model.id or not model.schema_:
                 raise ValueError(f"{path} must be an ODCS v3.2.0 DataContract with an id and schema")
             contract = model.model_dump(by_alias=True, exclude_unset=True)
+            for custom in contract.get("customProperties", []):
+                if custom["property"] == "key_definitions":
+                    if set(custom["value"]) & set(key_definitions):
+                        raise ValueError("Duplicate shared key definitions")
+                    key_definitions.update(custom["value"])
+                if custom["property"] == "orchestration":
+                    if orchestration:
+                        raise ValueError("Orchestration must be declared in one contract")
+                    orchestration = custom["value"]
             if layer == "source":
                 for source in source_interfaces(contract):
                     if source.object_name in sources:
@@ -115,11 +128,20 @@ def load_contract_catalog(root: Path) -> ContractCatalog:
                     **element,
                     "contract_id": contract["id"],
                     "contract_version": contract["version"],
+                    "domain": contract["domain"],
                 }
-    catalog = ContractCatalog(sources=sources, expectations=expectations, objects=objects)
+    from medallion_poc.keys import validate_definitions
+
+    validate_definitions(key_definitions)
+    for obj in objects.values():
+        obj["key_definitions"] = key_definitions
+    catalog = ContractCatalog(sources, expectations, objects, key_definitions, orchestration)
     from medallion_poc.execution import validate_catalog
 
     validate_catalog(catalog)
+    from medallion_poc.operations import validate_orchestration
+
+    validate_orchestration(catalog)
     return catalog
 
 
@@ -202,6 +224,8 @@ def breaking_changes(previous: dict[str, Any], current: dict[str, Any]) -> list[
             new_property = new_properties[property_name]
             if old_property.get("logicalType") != new_property.get("logicalType"):
                 changes.append(f"changed type of {path}")
+            elif old_property.get("physicalType") != new_property.get("physicalType"):
+                changes.append(f"changed physical type of {path}")
             if not old_property.get("required", False) and new_property.get("required", False):
                 changes.append(f"made optional property required: {path}")
         for property_name, new_property in new_properties.items():
